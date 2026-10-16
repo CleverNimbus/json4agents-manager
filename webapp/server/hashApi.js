@@ -2,7 +2,7 @@
  * Hashing tab backend.
  *
  *   POST /api/hash   -> streams newline delimited JSON progress events
- *   GET  /api/hashes -> the current content of hashes.json
+ *   GET  /api/hashes -> the history assembled from the hash run files
  *
  * The stream keeps the browser's "last file hashed" line in sync while the
  * server works, and closing the connection (the Cancel button) aborts the run.

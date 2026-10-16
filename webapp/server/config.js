@@ -7,7 +7,8 @@
  *
  *   data/agents.schema.json   the schema every agent file is validated against
  *   data/agents/<CODE>.json   one file per agent record
- *   data/hashes.json          hash results
+ *   data/hashes/runs/*.json   one immutable file per hash run
+ *   data/hashes/index.json    derived cache, rebuilt when it does not match
  */
 import os from 'node:os';
 import path from 'node:path';

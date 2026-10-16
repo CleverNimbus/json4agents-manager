@@ -66,6 +66,26 @@ async function readAgentFile(code) {
  * @returns {Promise<{ records: object[], issues: Array<{file:string,message:string}> }>}
  */
 export async function listAgents() {
+  const { records, issues } = await scanAgents();
+  return { records: records.map((record) => record.agent), issues };
+}
+
+export async function readAgent(code) {
+  await ensureStore();
+  return readAgentFile(assertValidCode(code));
+}
+
+/**
+ * Read every agent file, keeping only the ones whose identity is sound.
+ *
+ * An agent's code is its file name, so a file whose content says something else
+ * cannot be addressed, renamed or deleted without creating a second copy of the
+ * record. Such files are reported as issues and left out of the list rather
+ * than shown as a row that would write to the wrong file.
+ *
+ * @returns {Promise<{ records: Array<{code: string, agent: object, file: string}>, issues: Array<{file: string, message: string}> }>}
+ */
+export async function scanAgents() {
   await ensureStore();
   const entries = await fs.readdir(files.agentsDir, { withFileTypes: true });
   const issues = [];
@@ -73,20 +93,43 @@ export async function listAgents() {
 
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+    const file = path.join(files.agentsDir, entry.name);
+
+    let agent;
     try {
-      records.push(JSON.parse(await fs.readFile(path.join(files.agentsDir, entry.name), 'utf8')));
+      agent = JSON.parse(await fs.readFile(file, 'utf8'));
     } catch (err) {
       issues.push({ file: entry.name, message: err.message });
+      continue;
     }
+
+    const expected = path.basename(entry.name, '.json');
+    if (typeof agent?.code !== 'string' || agent.code === '') {
+      issues.push({ file: entry.name, message: 'The record has no "code" field' });
+      continue;
+    }
+    if (agent.code !== expected) {
+      issues.push({
+        file: entry.name,
+        message: `File name and code disagree: the file is ${expected}.json but the record says "${agent.code}"`,
+      });
+      continue;
+    }
+    records.push({ code: agent.code, agent, file });
   }
 
-  records.sort((a, b) => String(a?.code ?? '').localeCompare(String(b?.code ?? ''), undefined, { sensitivity: 'base' }));
-  return { records, issues };
-}
+  // Two codes that differ only in case are two files on Linux and one file on
+  // macOS or Windows, where the second write would silently clobber the first.
+  const folded = new Map();
+  for (const record of records) {
+    const key = record.code.toLowerCase();
+    const previous = folded.get(key);
+    if (previous) issues.push({ file: path.basename(record.file), message: `Code collides with ${previous} ignoring case` });
+    else folded.set(key, record.code);
+  }
 
-export async function readAgent(code) {
-  await ensureStore();
-  return readAgentFile(assertValidCode(code));
+  records.sort((a, b) => a.code.localeCompare(b.code, undefined, { sensitivity: 'base' }));
+  return { records, issues };
 }
 
 export async function agentExists(code) {

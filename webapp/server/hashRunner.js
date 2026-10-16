@@ -26,6 +26,23 @@ export function sha256Hex(value) {
   return createHash('sha256').update(value).digest('hex');
 }
 
+/**
+ * Folder hash from its children: sha256 over `name \0 childHash \u001e` for
+ * every child, folders and files together, sorted by name.
+ *
+ * Exported so integrity checks recompute exactly what the runner wrote instead
+ * of a second implementation that could drift.
+ *
+ * @param {Array<{name: string, hash: string}>} children
+ */
+export function rollupHash(children) {
+  const parts = [...children]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((child) => `${child.name}${NAME_SEP}${child.hash}${ENTRY_SEP}`)
+    .join('');
+  return sha256Hex(parts);
+}
+
 function abortError() {
   const err = new Error('Hashing cancelled');
   err.name = 'AbortError';
@@ -188,11 +205,9 @@ export async function hashFolder(root, { includeHidden = true, followSymlinks = 
       ...dir.files
         .map((file) => ({ name: file.name, hash: fileHashes.get(file.path) }))
         .filter((file) => file.hash),
-    ].sort((a, b) => a.name.localeCompare(b.name));
+    ];
 
-    const hash = sha256Hex(
-      children.map((child) => `${child.name}${NAME_SEP}${child.hash}${ENTRY_SEP}`).join(''),
-    );
+    const hash = rollupHash(children);
     folderHashes.set(rel, hash);
     folderList.push({ path: rel === '' ? '.' : rel, hash });
     onEvent({ type: 'folder', path: rel === '' ? '.' : rel, hash, done: folderList.length, total: folderHashes.size });

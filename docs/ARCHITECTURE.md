@@ -14,7 +14,7 @@ own machine:
 1. **Agent records** - one JSON file per agent in `data/agents/`, validated
    against a JSON Schema.
 2. **Hash history** - SHA-256 hashes of files and folders, kept in
-   `data/hashes.json`, used to see what changed since the last run.
+   `data/hashes/runs/`, used to see what changed since the last run.
 
 The Node server owns all file access. The browser is a pure view: it never asks
 for filesystem permissions and works in any current browser. The previous
@@ -34,6 +34,7 @@ export PATH=/home/sefe/local-sources/00_frameworks/node-v24.15.0-linux-x64/bin:$
 npm install     # 94 packages, no build step
 npm start       # http://127.0.0.1:8000
 npm run dev     # same with node --watch
+npm run doctor  # read only integrity checks, exit 1 if anything is an error
 ```
 
 Server flags (also `PORT` / `HOST` / `JSONM_DATA_DIR` environment variables):
@@ -50,6 +51,7 @@ Server flags (also `PORT` / `HOST` / `JSONM_DATA_DIR` environment variables):
 tests at it. Twice in this project's history a test run wrote junk into the real
 `data/hashes.json` and into real agent files; recovery was done by restoring a
 `cp -r data /tmp/backup` snapshot taken beforehand. Keep taking that snapshot.
+`npm run doctor -- --data-dir /tmp/some-copy` is safe for the same reason.
 
 ## 3. Architecture
 
@@ -57,7 +59,7 @@ tests at it. Twice in this project's history a test run wrote junk into the real
 browser (Vue 3 ESM, no bundler)
    |  fetch JSON
    v
-Express 5 server  ->  filesystem (agents/, hashes.json, state.json, settings.json)
+Express 5 server  ->  filesystem (agents/, hashes/runs/, state.json, settings.json)
    |                     + child_process git (changes tab)
    v
 node:crypto (SHA-256), child_process (git status)
@@ -103,7 +105,7 @@ webapp/server/
   config.js                   CLI/env parsing; exports appDir, repoDir, config, files
   store.js                    readJsonFile / writeJsonFile (atomic) / fileExists
   validate.js                 Ajv setup; validateAgentRecord, validateAgentCollection
-  agentsStore.js              one JSON file per agent; code<->filename rules
+  agentsStore.js              one JSON file per agent; code<->filename rules, scanAgents()
   agentsValidation.js         checkAgent(agent, previousCode) - shared by CRUD and linking
   agentsApi.js                CRUD for agent files, GET /api/schema, POST link-files
   gitChanges.js               git status of the workspace folder
@@ -111,7 +113,7 @@ webapp/server/
   fsApi.js                    GET /api/fs (folder browser backend), path jail
   hashRunner.js               tree walk, parallel SHA-256, folder rollups
   hashApi.js                  POST /api/hash (NDJSON stream), GET /api/hashes
-  hashesStore.js              merge a run into hashes.json
+  hashesStore.js              run files, derived index, legacy migration
   stateFile.js                shared read/write helper for the two small state files
   stateStore.js               data/state.json
   stateApi.js                 GET/PUT /api/state
@@ -133,6 +135,8 @@ webapp/src/
     LinkChangesTab.js         uncommitted git files -> agent linking
     FolderPicker.js           in-app folder browser modal
     SettingsTab.js            workspace folder + git root settings
+webapp/tools/
+  doctor.js                   npm run doctor - read only integrity checks, exit 1 on errors
 ```
 
 ## 5. Data files
@@ -184,17 +188,41 @@ itself (gives precise per-field errors), once against the root schema for the
 collection the record would join (catches cross-record problems). See
 `agentsValidation.js`.
 
-### hashes.json
+**Identity is enforced on read, not only on write.** `scanAgents()` keeps a file
+only when its name stem equals its `code`. A file that disagrees cannot be
+addressed, renamed or deleted without creating a second copy of the record, so
+it is reported as an issue and left out of the list rather than shown as a row
+that would write to the wrong file. Codes that collide when case is folded are
+also reported: two files on Linux, one file on macOS or Windows. Every issue is
+surfaced through `GET /api/agents` as an entry in `errors`, so the grid's error
+badge and `npm run doctor` report the same findings.
+
+### Hash run files
 
 ```jsonc
+// data/hashes/runs/2026-10-16T19-04-31-469Z_a200cd6c.json - written once, never edited
 {
-  "sourceFolder": "/abs/path",
-  "generated":    "ISO timestamp",
-  "runs":    [{ "root", "startedAt", "finishedAt", "durationMs", "files", "bytes", "errors", "changed", "unchanged" }],
-  "folders": [{ "path", "hashes": [{ "datetime", "hash" }] }],
-  "files":   [{ "path", "size", "mtime", "hashes": [{ "datetime", "hash" }] }]
+  "id": "2026-10-16T19-04-31-469Z_a200cd6c",  // finishedAt + random suffix, so it sorts by time
+  "host": "laptop",
+  "root": "/abs/path",
+  "startedAt": "…", "finishedAt": "…", "durationMs": 524,
+  "stats": { "files": 990, "bytes": 4190372, "errors": 0, "changed": 3, "unchanged": 2425 },
+  "files":   [{ "path", "size", "mtime", "hash" }],   // only what changed
+  "folders": [{ "path", "hash" }]
 }
 ```
+
+A run file is a **delta**: `saveHashRun` compares each result against the index
+and records only paths whose hash differs. An unchanged tree therefore produces a
+run file of a few hundred bytes containing run metadata and empty arrays, rather
+than a rewrite of the whole store. Nothing that exists is ever edited, which is
+what makes two people hashing at the same time produce two files that git merges
+without a conflict.
+
+`data/hashes/index.json` is derived, git ignored and rebuilt whenever a run file
+appears or changes (the fingerprint is `name:size:mtime` for each run file). The
+API serves the old flat shape assembled from it - `files`/`folders` rows with a
+`hashes[]` history newest first - so no browser component knows about run files.
 
 Folder hashes roll up bottom-up:
 
@@ -205,13 +233,24 @@ folderHash = sha256( concat over children sorted by name of  name + "\0" + child
 This is the algorithm the old browser implementation used, verified to
 reproduce all 311 folder hashes that shipped in the original file byte for byte.
 An empty folder therefore hashes to `e3b0c442…b855` (digest of the empty
-string).
+string). `rollupHash()` in `hashRunner.js` is the single implementation, used by
+both the runner and the doctor's rollup check so the two cannot drift.
 
-**Identical hashes are never stored twice.** `hashesStore.appendHash` compares
-against the entry's last stored hash and skips the write when they match, so
-"3 hashes" means the content changed three times, not that the folder was
-scanned three times. `files[].size` and `mtime` always reflect the most recent
-observation even when content is unchanged.
+`size` and `mtime` come from the newest run that mentions the path. Whether a
+path "changed" is likewise computed, by comparing consecutive hashes in its
+assembled history - never stored, so a merge cannot corrupt it.
+
+### npm run doctor
+
+`webapp/tools/doctor.js` is read only and exits `1` when it finds an error, so
+it can gate a commit. It reuses the server modules rather than reimplementing
+them (`scanAgents`, `validateAgentRecord`, `readAllRuns`, `rollupHash`,
+`validateWorkspaceSettings`) and prints `ERROR` / `WARNING` / `INFO` groups, or
+`--json`. Checks are listed in the README.
+
+Two checks are guards against tampering rather than reachable states: a history
+that repeats a hash, and one that goes out of order. With deltas the writer
+cannot produce either, but a hand-edited or third-party run file can.
 
 ## 6. HTTP API
 
@@ -227,7 +266,7 @@ observation even when content is unchanged.
 | `GET /api/changes` | uncommitted git files in the workspace folder |
 | `GET /api/fs?path=` | one directory listing for the folder browser |
 | `POST /api/hash` | NDJSON progress stream, see below |
-| `GET /api/hashes` | current hashes.json |
+| `GET /api/hashes` | hash history assembled from the run files |
 | `GET`/`PUT /api/state` | session memory (last hashed folder) |
 | `GET`/`PUT /api/settings` | workspace folder + git root |
 | `GET`/`PUT /api/data-folder` | the data folder, and switching it |
@@ -252,8 +291,9 @@ Unknown routes return `404` as JSON, not HTML.
 
 The browser consumes it with `api.hashFolder()`, reading `response.body` as a
 stream. Closing the connection aborts the server side: `res.on('close')` fires an
-`AbortController` and the hashing loop stops without touching `hashes.json`.
-Verified: after abort the process drops to 0% CPU and the file's md5 is
+`AbortController` and the hashing loop stops before anything is written - no run
+file, no index rebuild.
+Verified: after abort the process drops to 0% CPU and the run directory is
 unchanged.
 
 ## 7. The four tabs
@@ -357,21 +397,26 @@ on screen.
 | Sorted by code | filesystem order is not stable |
 | Server-side validation | single source of truth; browser stays thin |
 | NDJSON for hashing | progress must arrive while the server is still working |
-| Dedupe identical hashes | repeated scans of unchanged trees otherwise fill the file with noise |
+| Delta run files | two users hashing at the same time used to collide on one shared document, and a merge could reorder a history so a stale hash looked current. Separate immutable files merge cleanly, and "current" is computed, never stored |
+| Identity checked on read | a file whose code disagrees with its name cannot be addressed without duplicating the record; reporting it beats showing a row that writes to the wrong file |
+| Dedupe identical hashes | repeated scans of unchanged trees otherwise fill the store with noise |
+| `npm run doctor` reuses server modules | a second implementation of the checks could disagree with the code it checks |
 | Shared `stateFile` / `agentsValidation` | two callers, one implementation |
 | Settings separate from state | `state.json` is what the app remembers *about* a session; `settings.json` is what a human configured |
 
 ## 10. Known gaps
 
-- `data/hashes.json` is tracked and grows on every run; each hash run makes a
-  large diff. Gitignoring it was offered and never taken up.
+- Folder hashes sort children with `localeCompare`, which is ICU-dependent. Two
+  machines with different locales can order differently and therefore compute
+  different folder hashes for an identical tree. Making it byte-stable would
+  invalidate every recorded folder hash once; the doctor flags the mismatch, but
+  the fix has not been taken up.
 - Linked files stay in the Link Changes list after linking - they are still
   uncommitted. Intended, not a bug, but easy to mistake for one.
-- Pre-existing duplicate hashes from before the dedupe rule was added (rows with
-  two identical stored hashes) remain in `data/hashes.json`; they show no yellow
-  dot. A one-off cleanup was offered and never taken up.
-- No automated test suite. Everything is verified by hand with curl plus a real
-  browser; keep that up for new features.
+- Hash run files accumulate forever. There is no retention policy or compaction;
+  a busy workspace that hashes daily will grow a file per run.
+- No automated test suite. Everything is verified by hand with curl, `npm run
+  doctor` plus a real browser; keep that up for new features.
 - `--root` is a CLI flag only; the workspace git root is not enforced as a jail.
 
 ## 11. Where to add things
@@ -384,3 +429,4 @@ on screen.
 | new grid | reuse `DataTable` with a `#cell-<key>` slot |
 | new API route | a `Router` in `webapp/server/`, mounted in `server.js`, wrapper in `src/api.js` |
 | new persisted file | add to `config.files`, read via `store.js`, write atomically |
+| new integrity check | `webapp/tools/doctor.js`; reuse the server module so the check cannot drift, and list it in the README |

@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node webapp/server.js",
-    "dev": "node --watch webapp/server.js"
+    "dev": "node --watch webapp/server.js",
+    "doctor": "node webapp/tools/doctor.js"
   },
   "dependencies": {
     "ajv": "^8.20.0",

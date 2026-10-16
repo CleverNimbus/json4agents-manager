@@ -86,6 +86,7 @@ async function readRunFile(file) {
   if (!run || typeof run !== 'object' || typeof run.finishedAt !== 'string') return null;
   return {
     id: path.basename(file, '.json'),
+    file,
     root: run.root ?? '',
     host: run.host ?? '',
     startedAt: run.startedAt ?? run.finishedAt,

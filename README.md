@@ -25,6 +25,29 @@ Options (also available as `PORT` / `JSONM_DATA_DIR` / `HOST`):
 `npm run dev` does the same with `node --watch`, so the server restarts when a
 file in `server/` changes.
 
+## Checks
+
+```bash
+npm run doctor                              # check the data folder
+npm run doctor -- --data-dir /path/to/data
+npm run doctor -- --json                    # machine readable
+```
+
+The store is plain files in git, so the failures worth catching are not crashes
+but states that are still valid JSON and are still wrong. The doctor is read
+only and reports, with a severity for each:
+
+| Area | Checks |
+| --- | --- |
+| agents | file name matches the record's code, no two files claiming one code, no codes colliding by case, record parses, record matches the schema, set valued fields (`result_generated_files`, `executions`, `source_dependant_files`) free of duplicates and sorted, no absolute or `..` paths in them, `parent` points at an agent that exists |
+| hashes | run files parse, no two runs claiming one id, every path relative and inside the root, no path whose history repeats a hash, no history out of order, every folder hash equal to the rollup of its children's current hashes, the index listing every run |
+| data | `agents.schema.json` present, a leftover legacy `hashes.json`, the pre-migration backup, incomplete workspace settings |
+
+Exit code is `1` when anything is an error, so it can gate a commit or a build.
+A folder hash is recomputed with the very function the runner used
+(`rollupHash` in `server/hashRunner.js`), not a second implementation, so the
+check cannot drift from the writer.
+
 ## Data layout
 
 `webapp/` holds only code; everything the app persists lives in `data/`:
@@ -58,6 +81,13 @@ defaults instead of breaking the app.
 - **The code is the file name.** Codes are checked against
   `[A-Za-z0-9][A-Za-z0-9._-]*` before they become a path, so a code can never
   escape the folder. Changing a code in the edit popup renames the file.
+- **A file whose code disagrees with its name is refused.** `AG-777.json`
+  containing `"code": "AG-001"` cannot be addressed, renamed or deleted without
+  creating a second copy of the record, so it is reported as an error and left
+  out of the grid instead of appearing as a row that would write to the wrong
+  file. The error names the file and both codes. Two files whose codes differ
+  only in case are also reported: they are two files on Linux and one file on
+  macOS or Windows.
 - **Grid order is code order.** Files are read in any order and sorted by agent
   code, so the grid never depends on the filesystem.
 - **A broken file is reported, not hidden.** A file that cannot be parsed, or
