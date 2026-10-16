@@ -1,25 +1,73 @@
 # json4agents-manager
 
-Local web app for viewing and editing the agent records in `data/agents/` and
-for hashing folders into `data/hashes.json`. Node does all the work on this
-machine: the server reads and writes the JSON files directly and hashes files
-with `node:crypto`. The browser is only the UI - it needs no file system
-permissions of its own and works in any current browser.
+A local web app for keeping track of agents and the files they touch: browse and
+edit agent records, hash a folder to see exactly what changed since the last run,
+and link uncommitted git files to the agent that produced them.
 
-## Run
+Everything stays on your machine. The Node server reads and writes plain JSON
+files and hashes with `node:crypto`; the browser is only the UI, so it needs no
+file system permissions of its own and there is no account, no sync and no
+telemetry.
 
-```bash
+```
 npm install
-npm start                 # http://127.0.0.1:8000
+npm start        # http://127.0.0.1:8000
 ```
 
-Options (also available as `PORT` / `JSONM_DATA_DIR` / `HOST`):
+Node 22 or newer. No build step, no bundler, four dependencies.
+
+---
+
+## What it does
+
+**Agents** — one JSON file per record under `data/agents/`, ordered by code. Add,
+edit and delete from a schema-driven popup; editing a code renames the file. A
+file whose content disagrees with its name is reported rather than loaded,
+because it cannot be addressed without creating a second copy of the record.
+
+**Hashing** — point it at a folder and it writes SHA-256 for every file and a
+rolled-up hash for every folder, with a live progress line. Yellow dot on a row
+whose content changed; click a row for its full history, newest first. Re-hashing
+an unchanged tree records almost nothing.
+
+**Link Changes to Agent** — the uncommitted files in your workspace, listed from
+`git status`, with checkboxes and an agent picker that writes the selection into
+that agent's `result_generated_files`.
+
+**Settings** — where the workspace is, where its git root is, and where the data
+folder lives. Saving reloads everything that depends on it.
+
+## Why the interesting parts are interesting
+
+**One file per record.** Two agents can never overwrite each other, and a single
+record diffs, reviews and merges on its own.
+
+**One immutable file per hash run.** A single shared `hashes.json` is rewritten
+in full by every run, so two people who hash anything at all collide on the same
+sorted document - and a merge can reorder a history so the grid shows a *stale
+hash as current* with no error anywhere. Run files are separate, so git merges
+them without looking inside, and "which hash is current" is computed from the run
+files rather than stored.
+
+**`npm run doctor`.** The store is plain files in git, so the failures worth
+catching are not crashes but states that are still valid JSON and still wrong: a
+folder hash that no longer matches its children, an agent whose code disagrees
+with its file name, a history that repeats itself. Read only, exits non-zero, so
+it can gate a commit.
+
+**235 tests, no test framework.** `node:test` ships with Node. The suite runs the
+real server on an ephemeral port against a throwaway data folder, and replays a
+real two-user `git merge`.
+
+## Options
+
+Also available as `PORT` / `HOST` / `JSONM_DATA_DIR`:
 
 | Flag | Meaning | Default |
 | --- | --- | --- |
 | `--port 9000` | port to listen on | `8000` |
 | `--host 0.0.0.0` | interface to bind | `127.0.0.1` |
-| `--data-dir /path` | see *Data folder* below | `<repo>/data` |
+| `--data-dir /path` | where the data files live | `<repo>/data` |
 | `--root ~/projects` | jail: browsing and hashing stop at this folder | unrestricted |
 
 `npm run dev` does the same with `node --watch`, so the server restarts when a
@@ -96,7 +144,7 @@ data/
     AG-002.json
     AG-003.json
   hashes/
-    runs/*.json         one immutable file per hash run
+    runs/*.json         one immutable file per hash run   [git ignored]
     index.json          derived cache (git ignored, rebuildable)
   state.json            UI state, e.g. the last folder used in the hashing tab
   settings.json         settings chosen in the Settings tab
@@ -105,9 +153,15 @@ data/
 Writes go through a temporary file plus `rename()`, so an interrupted write can
 never truncate a file.
 
-`state.json` and `settings.json` are machine specific, so they are git ignored.
-Both are also optional: a missing, empty or malformed one falls back to the
-defaults instead of breaking the app.
+**Hash run files are not tracked.** They record the absolute path of the folder
+that was hashed and the path of every file in it, which is local information by
+nature - so this repository ships an empty store and your first run fills it. A
+team that wants one shared store in git can opt in; see
+[`data/hashes/README.md`](data/hashes/README.md).
+
+`state.json` and `settings.json` are machine specific too, so they are git
+ignored. Both are also optional: a missing, empty or malformed one falls back to
+the defaults instead of breaking the app.
 
 ### The agent store
 
@@ -145,17 +199,17 @@ popup and nothing is written. Editing the code renames the file.
 
 **Hashing** - text box with a folder path plus an *Explore* button that opens an
 in-app folder browser (no native dialog, no browser permission prompt). *Hash
-folder* walks the tree, streams progress and writes the result into
-`hashes.json`. One line under the toolbar always shows the state, including the
-last file that was hashed, so a long run is visibly moving:
+folder* walks the tree, streams progress and writes one run file. One line under
+the toolbar always shows the state, including the last file that was hashed, so a
+long run is visibly moving:
 
 ```
-Hashing 118/990 files · 727 KB · last: noiselabyrinth_shared/.dart_tool/…/vs_code.json
+Hashing 118/990 files · 727 KB · last: src/lib/parser/vs_code.json
 ```
 
-*Cancel* aborts the run: the server stops hashing and `hashes.json` is left
-untouched. Below the toolbar the same file can be viewed as **Files**,
-**Folders** or **Runs**, sortable and filterable.
+*Cancel* aborts the run: the server stops hashing and nothing is written at all -
+no run file, no index rebuild. Below the toolbar the store can be viewed as
+**Files**, **Folders** or **Runs**, sortable and filterable.
 
 ### Reading the hash grids
 
@@ -234,20 +288,20 @@ consumer of the two settings above.
 
 ## Hashing details
 
-- SHA-256, streamed per file, 8 files in parallel. Throughput on this machine:
-  ~20 000 files / 79 MB in ~4.5 s.
+- SHA-256, streamed per file, 8 files in parallel. Throughput on the machine
+  this was developed on: ~20 000 files / 79 MB in ~4.5 s.
 - Hidden files are included by default (tick *hidden* off to skip them).
   Symlinks are skipped unless *follow symlinks* is ticked, which also prevents
   symlink loops.
 - Folder hashes are rolled up bottom up: the hash of a folder is the SHA-256 of
   `name \0 childHash \u001e` for each of its children (folders and files, sorted
   by name). This is the same algorithm the previous browser-only version used,
-  so the 311 folder hashes already in `hashes.json` are reproduced exactly by
-  this server, and an empty folder still hashes to
-  `e3b0c442…b855` (the digest of an empty string).
-- Hashing the folder that contains `hashes.json` is self-referential - the file
-  is written after the walk, so its own hash describes the pre-write content.
-  Hash something outside `webapp/` if that matters.
+  verified to reproduce all 311 folder hashes that shipped in the original file
+  byte for byte, and an empty folder still hashes to `e3b0c442…b855` (the
+  digest of an empty string).
+- Hashing a folder that contains the store is self-referential: the run file is
+  written after the walk, so its own hash describes the pre-write content. Hash
+  something outside the data folder if that matters.
 
 ## Hash storage: one immutable file per run
 
@@ -349,6 +403,22 @@ test/                         npm test: node:test suite, temp data folders only
 All MIT and actively maintained: [express](https://expressjs.com) 5.x (HTTP
 server), [vue](https://vuejs.org) 3.5 (UI, served from `node_modules`, no
 bundler), [ajv](https://ajv.js.org) 8.x + ajv-formats (schema validation).
-Hashing uses `node:crypto`, so there is no hashing dependency.
+Hashing uses `node:crypto`, so there is no hashing dependency. Tests use
+`node:test`, so there is no test dependency either.
+
+The app itself is GPL-3.0; every dependency above is MIT.
 
 Requires Node 22 or newer (developed against Node 24).
+
+## Documentation
+
+| | |
+| --- | --- |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | how it is built and why - the file to read first |
+| [`docs/llm-chats/`](docs/llm-chats/) | dated session records: decisions, measured facts, bugs found, open items |
+| [`data/hashes/README.md`](data/hashes/README.md) | what a hash run file is, and how to share a store through git |
+| `npm run doctor` | check a data folder without changing anything |
+
+## License
+
+[GPL-3.0](LICENSE) - see the `LICENSE` file.

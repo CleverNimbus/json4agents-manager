@@ -23,11 +23,10 @@ required Chromium and permission prompts; it was removed in `5992e97`.
 
 ## 2. Running it
 
-Node must be on `PATH`. On this machine:
+Node 22 or newer must be on `PATH`:
 
 ```bash
-export PATH=/home/sefe/local-sources/00_frameworks/node-v24.15.0-linux-x64/bin:$PATH
-# Node 24.18.0, npm 12.2.0
+node --version   # v22 or newer
 ```
 
 ```bash
@@ -48,10 +47,12 @@ Server flags (also `PORT` / `HOST` / `JSONM_DATA_DIR` environment variables):
 | `--root` | unrestricted | jail: browsing and hashing cannot leave this folder |
 
 **Testing pattern that matters:** never exercise write paths against the real
-`data/`. Start a second instance with `--data-dir /tmp/some-copy` and point the
-tests at it. Twice in this project's history a test run wrote junk into the real
-`data/hashes.json` and into real agent files; recovery was done by restoring a
-`cp -r data /tmp/backup` snapshot taken beforehand. Keep taking that snapshot.
+`data/`. The test suite enforces this - `test/helpers.js` hands every test its own
+folder under the OS temp dir and the suite asserts it left no `data-location.json`
+behind - but a manual experiment should do the same: start a second instance with
+`--data-dir /tmp/some-copy`. Twice in this project's history a manual test wrote
+junk into the real `data/hashes.json` and into real agent files; recovery was done
+by restoring a `cp -r data /tmp/backup` snapshot taken beforehand.
 `npm run doctor -- --data-dir /tmp/some-copy` is safe for the same reason.
 
 ## 3. Architecture
@@ -149,15 +150,24 @@ data/
   agents.schema.json    JSON Schema draft 2020-12 - the contract for agent files
   agents/<CODE>.json    one agent per file; the file name IS the code
   hashes/
-    runs/<runId>.json   one immutable file per hash run         (committed)
+    README.md           why the run files are not tracked
+    runs/<runId>.json   one immutable file per hash run         [gitignored]
     index.json          derived cache, rebuilt on demand        [gitignored]
   state.json            last hashed folder (session memory)      [gitignored]
   settings.json         workspace folder + git root (config)     [gitignored]
 data-location.json      which folder is the data folder          [gitignored]
 ```
 
+**Nothing under `data/hashes/runs/` is published.** A run file records the
+absolute path of the folder it hashed and the path of every file in it, so it is
+local information by nature. The repository ships an empty store; the app creates
+the folder on demand and the first run fills it. A team that wants one shared
+store in git opts in by dropping that line from `.gitignore` - see
+`data/hashes/README.md`.
+
 An old single `hashes.json` is converted once at startup into run files (see
-`migrateLegacyHashes`); the original is kept as `hashes.migrated.json`.
+`migrateLegacyHashes`); the original is kept as `hashes.migrated.json`, which is
+ignored as well.
 
 The data folder itself is a setting, so it cannot be stored inside the data
 folder - it lives in `data-location.json` next to `package.json`. Startup

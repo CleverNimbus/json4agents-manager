@@ -39,9 +39,12 @@ const as = (cwd, who, ...args) =>
  *
  * The store lives in `<clone>/data`, so a test can hash a tree with the app
  * pointed at that clone's own folder and the run file lands inside the
- * repository, exactly as it would in real use. The repository is created with
- * this project's .gitignore, which is part of the design: the derived index
- * must never be committed, or it conflicts on every merge.
+ * repository, exactly as it would in real use.
+ *
+ * The repository is created with the `.gitignore` a team gets after opting into
+ * a shared store (see data/hashes/README.md): run files tracked, the derived
+ * index not. Shipping that index would make it conflict on every merge, which is
+ * the whole reason it is derived rather than stored.
  */
 async function twoMachines() {
   const root = await tempDir('merge');
@@ -49,7 +52,7 @@ async function twoMachines() {
   const bob = path.join(root, 'bob');
 
   await fs.mkdir(path.join(alice, 'data', 'agents'), { recursive: true });
-  await fs.copyFile(path.join(repoDir, '.gitignore'), path.join(alice, '.gitignore'));
+  await write(path.join(alice, '.gitignore'), 'data/hashes/index.json\n');
   await git(alice, 'init', '-q', '-b', 'main', '.');
   await as(alice, 'alice', 'commit', '-q', '--allow-empty', '-m', 'init');
 
@@ -93,7 +96,22 @@ describe('the precondition for a clean merge', () => {
 
     const tracked = await git(alice, 'ls-files', 'data/hashes');
     assert.ok(!tracked.includes('index.json'), 'and must not be tracked');
-    assert.ok(tracked.includes('runs/'), 'while the run files are tracked');
+    assert.ok(tracked.includes('runs/'), 'while the run files are tracked by a team that opted in');
+  });
+
+  it('ships a repository that publishes no local folder information by default', async () => {
+    // The project's own .gitignore, which is what a fresh clone gets.
+    const root = await tempDir('default-ignore');
+    await fs.cp(path.join(repoDir, '.gitignore'), path.join(root, '.gitignore'));
+    await fs.mkdir(path.join(root, 'data', 'hashes', 'runs'), { recursive: true });
+    await write(path.join(root, 'data', 'hashes', 'runs', '2026-01-01T00-00-00-000Z_x.json'), {});
+    await git(root, 'init', '-q', '-b', 'main', '.');
+    await as(root, 'tester', 'add', '-A');
+
+    const staged = await git(root, 'diff', '--cached', '--name-only');
+    assert.ok(!staged.includes('runs/'), 'a hash run file must never be staged by accident');
+    assert.equal(await git(root, 'check-ignore', 'data/hashes/runs/2026-01-01T00-00-00-000Z_x.json').catch(() => ''),
+      'data/hashes/runs/2026-01-01T00-00-00-000Z_x.json');
   });
 });
 

@@ -156,7 +156,13 @@ data/state.json
 data/settings.json
 data-location.json
 
-# Hash store: the run files are the shared record and ARE committed; the index
-# is derived from them and must never be merged.
+# Hash store.
+#
+# Run files record the absolute path of the folder that was hashed and the paths
+# of everything in it, so they must never be published by accident. They are the
+# shared record when a team keeps one store in git - see data/hashes/README.md
+# for how to opt into that - but out of the box this repository ships no local
+# folder information.
+data/hashes/runs/
 data/hashes/index.json
 data/hashes.migrated.json
