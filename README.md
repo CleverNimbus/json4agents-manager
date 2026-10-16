@@ -1,4 +1,4 @@
-# JSON Manager
+# json4agents-manager
 
 Local web app for viewing and editing the agent records in `data/agents/` and
 for hashing folders into `data/hashes.json`. Node does all the work on this
