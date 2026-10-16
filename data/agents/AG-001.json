@@ -1,0 +1,18 @@
+{
+  "code": "AG-001",
+  "name": "Root Orchestrator",
+  "description": "Coordinates the overall pipeline and dispatches to downstream agents.",
+  "notes": "Runs first. Keep phase order stable.",
+  "phase": 1,
+  "parent": "",
+  "source_dependant_files": [
+    "config/root.json"
+  ],
+  "result_generated_files": [
+    "out/root-report.md"
+  ],
+  "executions": [
+    "2026-10-15T08:00:00Z",
+    "2026-10-15T12:30:00Z"
+  ]
+}

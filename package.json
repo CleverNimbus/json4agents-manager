@@ -1,0 +1,22 @@
+{
+  "name": "json-manager",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local web app to view and edit agent records and to hash folders into per-run files",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node webapp/server.js",
+    "dev": "node --watch webapp/server.js",
+    "doctor": "node webapp/tools/doctor.js",
+    "test": "node --test --test-concurrency=1 --test-timeout=60000 test/*.test.js"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "express": "^5.3.0",
+    "vue": "^3.5.44"
+  }
+}

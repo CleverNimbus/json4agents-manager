@@ -1,0 +1,13 @@
+{
+  "code": "AG-003",
+  "name": "Tester",
+  "description": "Runs the test suite against the built artifact.",
+  "notes": "",
+  "phase": 3,
+  "parent": "AG-002",
+  "source_dependant_files": [
+    "tests/test_main.py"
+  ],
+  "result_generated_files": [],
+  "executions": []
+}
