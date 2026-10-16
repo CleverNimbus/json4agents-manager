@@ -157,6 +157,16 @@ export const files = {
   get hashes() {
     return path.join(config.dataDir, 'hashes.json');
   },
+  /** Hash store: one immutable file per run plus a rebuildable index. */
+  get hashesDir() {
+    return path.join(config.dataDir, 'hashes');
+  },
+  get hashesRunsDir() {
+    return path.join(config.dataDir, 'hashes', 'runs');
+  },
+  get hashesIndex() {
+    return path.join(config.dataDir, 'hashes', 'index.json');
+  },
   get state() {
     return path.join(config.dataDir, 'state.json');
   },

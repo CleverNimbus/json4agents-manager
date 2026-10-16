@@ -10,15 +10,13 @@
 import { Router } from 'express';
 import { files } from './config.js';
 import { hashFolder } from './hashRunner.js';
-import { saveHashRun } from './hashesStore.js';
-import { readJsonFile } from './store.js';
+import { getView, saveHashRun } from './hashesStore.js';
 import { resolveBrowsable } from './fsApi.js';
 
 export const hashRouter = Router();
 
 hashRouter.get('/api/hashes', async (req, res) => {
-  const data = await readJsonFile(files.hashes, { folders: [], files: [], runs: [] });
-  res.json({ file: files.hashes, data });
+  res.json({ file: files.hashesDir, data: await getView() });
 });
 
 hashRouter.post('/api/hash', async (req, res) => {
@@ -59,7 +57,7 @@ hashRouter.post('/api/hash', async (req, res) => {
     );
 
     send({ type: 'writing' });
-    const { changed, unchanged } = await saveHashRun(result);
+    const saved = await saveHashRun(result);
     send({
       type: 'done',
       summary: {
@@ -69,8 +67,12 @@ hashRouter.post('/api/hash', async (req, res) => {
         bytes: result.stats.bytes,
         errors: result.stats.errors,
         errorList: result.errors.slice(0, 20),
-        changed,
-        unchanged,
+        // Delta runs only record what changed; everything else is already in
+        // an earlier run file.
+        changed: saved.changed,
+        unchanged: Math.max(0, result.stats.files + result.folders.length - saved.changed),
+        runId: saved.id,
+        runFile: saved.file,
         durationMs: result.durationMs,
         finishedAt: result.finishedAt,
       },

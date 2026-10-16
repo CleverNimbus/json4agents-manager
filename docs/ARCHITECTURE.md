@@ -141,11 +141,16 @@ webapp/src/
 data/
   agents.schema.json    JSON Schema draft 2020-12 - the contract for agent files
   agents/<CODE>.json    one agent per file; the file name IS the code
-  hashes.json           file and folder hash history
+  hashes/
+    runs/<runId>.json   one immutable file per hash run         (committed)
+    index.json          derived cache, rebuilt on demand        [gitignored]
   state.json            last hashed folder (session memory)      [gitignored]
   settings.json         workspace folder + git root (config)     [gitignored]
 data-location.json      which folder is the data folder          [gitignored]
 ```
+
+An old single `hashes.json` is converted once at startup into run files (see
+`migrateLegacyHashes`); the original is kept as `hashes.migrated.json`.
 
 The data folder itself is a setting, so it cannot be stored inside the data
 folder - it lives in `data-location.json` next to `package.json`. Startup

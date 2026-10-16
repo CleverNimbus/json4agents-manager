@@ -54,10 +54,19 @@ const folderColumns = [
 
 const runColumns = [
   { key: 'finishedAt', label: 'Finished', text: (row) => formatTime(row.finishedAt) },
+  { key: 'host', label: 'Host', value: (row) => row.host ?? '', text: (row) => row.host || '—' },
   { key: 'root', label: 'Root folder', className: 'mono' },
-  { key: 'files', label: 'Files', align: 'right' },
-  { key: 'bytes', label: 'Bytes', align: 'right', text: (row) => formatBytes(row.bytes) },
-  { key: 'errors', label: 'Errors', align: 'right' },
+  { key: 'files', label: 'Files', align: 'right', value: (row) => row.stats?.files ?? 0 },
+  {
+    key: 'changed',
+    label: 'Changed',
+    align: 'right',
+    value: (row) => row.stats?.changed ?? 0,
+    // Runs converted from the old format have no counters.
+    text: (row) => (row.stats?.changed === null || row.stats?.changed === undefined ? '—' : row.stats.changed),
+  },
+  { key: 'bytes', label: 'Bytes', align: 'right', value: (row) => row.stats?.bytes ?? 0, text: (row) => formatBytes(row.stats?.bytes) },
+  { key: 'errors', label: 'Errors', align: 'right', value: (row) => row.stats?.errors ?? 0 },
   { key: 'durationMs', label: 'Duration', align: 'right', text: (row) => formatDuration(row.durationMs) },
 ];
 

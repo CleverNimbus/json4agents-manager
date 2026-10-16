@@ -19,6 +19,7 @@ import { changesRouter } from './server/changesApi.js';
 import { dataFolderRouter } from './server/dataFolderApi.js';
 import { fsRouter } from './server/fsApi.js';
 import { hashRouter } from './server/hashApi.js';
+import { migrateLegacyHashes } from './server/hashesStore.js';
 import { settingsRouter } from './server/settingsApi.js';
 import { stateRouter } from './server/stateApi.js';
 
@@ -80,6 +81,19 @@ app.listen(config.port, config.host, () => {
   console.log(`  data dir    : ${config.dataDir}${config.dataDirLocked ? '  (fixed by --data-dir)' : ''}`);
   console.log(`  agents      : ${files.agentsDir}/*.json`);
   console.log(`  schema      : ${files.schema}`);
-  console.log(`  hashes      : ${files.hashes}`);
+  console.log(`  hash runs   : ${files.hashesRunsDir}/*.json`);
   if (config.browseRoot) console.log(`  browse root : ${config.browseRoot}`);
 });
+
+// One-shot conversion of the old single-file hashes.json into per-run files.
+// Failure must not stop the app: the legacy file simply stays where it is.
+migrateLegacyHashes()
+  .then((migrated) => {
+    if (migrated) {
+      console.log(
+        `  migrated    : hashes.json -> ${migrated.runs} run file(s), ` +
+          `${migrated.files} file + ${migrated.folders} folder entries (kept a backup: ${migrated.backup})`,
+      );
+    }
+  })
+  .catch((err) => console.warn(`  could not migrate hashes.json: ${err.message}`));

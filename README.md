@@ -36,7 +36,9 @@ data/
     AG-001.json         one file per agent record - the file name is the agent code
     AG-002.json
     AG-003.json
-  hashes.json           hash results
+  hashes/
+    runs/*.json         one immutable file per hash run
+    index.json          derived cache (git ignored, rebuildable)
   state.json            UI state, e.g. the last folder used in the hashing tab
   settings.json         settings chosen in the Settings tab
 ```
@@ -103,8 +105,8 @@ untouched. Below the toolbar the same file can be viewed as **Files**,
   a file, so it has no hash history.
 - **Identical hashes are not stored twice.** Re-hashing an unchanged tree leaves
   the history alone, so "3 hashes" means the content really changed three times
-  rather than "scanned three times". The run itself is always recorded, with
-  how many entries changed and how many were unchanged.
+  rather than "scanned three times". The run itself is always recorded as a run
+  file - even an empty one, so the Runs view still shows that the scan happened.
 - **The folder is remembered.** Picking a folder, hashing it, or leaving a path
   in the text box stores it in `data/state.json`, and the next visit starts with
   it in the box. An interrupted hash run wins over the stored value, so a reload
@@ -181,24 +183,40 @@ consumer of the two settings above.
   is written after the walk, so its own hash describes the pre-write content.
   Hash something outside `webapp/` if that matters.
 
-## hashes.json format
+## Hash storage: one immutable file per run
 
-A superset of the file the old app produced, so an existing file loads as is:
+```
+data/hashes/runs/2026-10-16T19-04-31-469Z_e6962ad2.json
+```
 
 ```jsonc
 {
-  "sourceFolder": "/home/you/projects/thing",
-  "generated": "2026-10-16T19:44:07.482Z",
-  "runs":    [{ "root": "…", "startedAt": "…", "finishedAt": "…", "durationMs": 524, "files": 990, "bytes": 4190372, "errors": 0, "changed": 12, "unchanged": 1349 }],
-  "folders": [{ "path": "src/lib", "hashes": [{ "datetime": "…", "hash": "…" }] }],
-  "files":   [{ "path": "src/lib/main.js", "size": 2048, "mtime": "…", "hashes": [{ "datetime": "…", "hash": "…" }] }]
+  "id": "2026-10-16T19-04-31-469Z_e6962ad2",  // finishedAt + random suffix
+  "host": "laptop",                          // which machine hashed
+  "root": "/home/you/projects/thing",
+  "startedAt": "…", "finishedAt": "…", "durationMs": 524,
+  "stats": { "files": 990, "bytes": 4190372, "errors": 0, "changed": 3, "unchanged": 2425 },
+  "files":   [{ "path": "src/lib/main.js", "size": 2048, "mtime": "…", "hash": "…" }],
+  "folders": [{ "path": "src/lib", "hash": "…" }]
 }
 ```
 
-Re-hashing a path **appends** a timestamped hash to the existing entry, but only
-when the hash actually changed - an unchanged hash is dropped, which keeps the
-history meaningful. `files[].size` and `mtime` always describe the most recent
-observation, even when the content did not change.
+A run file is **written once and never edited**. It records only the paths whose
+hash *changed*, so a run over an unchanged tree produces a tiny file, and two
+people who hashed at the same time produce two files that git merges without a
+conflict.
+
+`data/hashes/index.json` is derived from the run files, is git ignored, and is
+rebuilt automatically whenever a run file appears or changes.
+
+Current state is **computed, never stored**: a path's history is assembled from
+every run file, newest first. That is what makes the store safe to share - with a
+single shared `hashes.json` two users hashing anything collided on the same
+sorted document, and a merge could reorder a history so the grid showed a stale
+hash as current with no error anywhere.
+
+An old single `hashes.json` is converted once at startup into run files, and the
+original is kept as `data/hashes.migrated.json`.
 
 ## API
 
@@ -212,7 +230,7 @@ observation, even when the content did not change.
 | `GET /api/schema` | the JSON Schema, used to build the edit form |
 | `GET /api/changes` | uncommitted git files inside the workspace folder |
 | `POST /api/agents/:code/link-files` | add paths to that agent's `result_generated_files` |
-| `GET /api/hashes` | current `hashes.json` |
+| `GET /api/hashes` | hash history assembled from the run files |
 | `GET /api/state` | `state.json` (e.g. the last hashed folder) |
 | `PUT /api/state` | merge a patch into `state.json` |
 | `GET /api/settings` | `settings.json` (workspace folder and git root) |
@@ -248,7 +266,7 @@ webapp/server/
   fsApi.js                    GET /api/fs, path resolution and root jail
   hashRunner.js               walk, parallel SHA-256, folder rollups
   hashApi.js                  POST /api/hash progress stream, GET /api/hashes
-  hashesStore.js              merge a run into hashes.json
+  hashesStore.js              run files, derived index, legacy migration
 webapp/index.html             import map: "vue" -> /vendor/vue.esm-browser.prod.js
 webapp/styles.css
 webapp/src/                   browser app (no build step)

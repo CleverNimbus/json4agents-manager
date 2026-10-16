@@ -155,3 +155,8 @@ vite.config.ts.timestamp-*
 data/state.json
 data/settings.json
 data-location.json
+
+# Hash store: the run files are the shared record and ARE committed; the index
+# is derived from them and must never be merged.
+data/hashes/index.json
+data/hashes.migrated.json

@@ -90,7 +90,8 @@ export const store = reactive({
         case 'done': {
           const s = this.summary;
           const moved = Number.isFinite(s.changed) ? ` · ${s.changed} changed, ${s.unchanged} unchanged` : '';
-          return `Done — ${s.files} files, ${s.folders} folders, ${formatBytes(s.bytes)} in ${formatDuration(s.durationMs)}${moved} → hashes.json${s.errors ? ` · ${s.errors} unreadable` : ''}`;
+          const run = s.runId ? ` · run ${String(s.runId).split('_')[0]}` : '';
+          return `Done — ${s.files} files, ${s.folders} folders, ${formatBytes(s.bytes)} in ${formatDuration(s.durationMs)}${moved}${run}${s.errors ? ` · ${s.errors} unreadable` : ''}`;
         }
         case 'cancelled':
           return `Cancelled after ${this.done}/${this.total || '?'} files — hashes.json left unchanged`;
@@ -366,7 +367,8 @@ function onHashEvent(event) {
       job.message = '';
       setBanner(
         'info',
-        `Saved hashes for ${event.summary.root} — ${event.summary.changed} changed, ${event.summary.unchanged} unchanged of ${event.summary.files + event.summary.folders} entries.`,
+        `Saved hashes for ${event.summary.root} — ${event.summary.changed} changed, ` +
+          `${event.summary.unchanged} unchanged, recorded as run ${String(event.summary.runId).split('_')[0]}.`,
       );
       break;
     case 'cancelled':
