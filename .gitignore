@@ -5,3 +5,4 @@ node_modules/
 # Machine specific local state and settings - not worth versioning.
 data/state.json
 data/settings.json
+data-location.json

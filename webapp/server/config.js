@@ -11,6 +11,7 @@
  */
 import os from 'node:os';
 import path from 'node:path';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 /** Parse `--key value`, `--key=value` and `--flag` into an object. */
@@ -43,13 +44,49 @@ export const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 export const serverDir = path.join(appDir, 'server');
 export const repoDir = path.resolve(appDir, '..');
 
+/**
+ * Where the "data folder" setting is remembered. It cannot live inside the data
+ * folder - moving the folder would move the setting that points at it - so it
+ * sits next to package.json, and defaults to <repo>/data when absent.
+ */
+export const dataFolderPointer = path.join(repoDir, 'data-location.json');
+
+function expand(input) {
+  const value = String(input ?? '').trim();
+  if (value === '' || value === '~') return os.homedir();
+  if (value.startsWith('~/')) return path.join(os.homedir(), value.slice(2));
+  return path.resolve(repoDir, value);
+}
+
+/** The data folder the user picked in Settings, if any. */
+function readDataFolderPointer() {
+  try {
+    const pointer = JSON.parse(readFileSync(dataFolderPointer, 'utf8'));
+    return typeof pointer?.dataFolder === 'string' && pointer.dataFolder.trim() !== '' ? pointer.dataFolder : '';
+  } catch {
+    return '';
+  }
+}
+
+/** CLI flag wins, then the setting from Settings, then <repo>/data. */
+function initialDataDir() {
+  const flag = args.dataDir || process.env.JSONM_DATA_DIR;
+  if (flag) return expand(flag);
+  const pointer = readDataFolderPointer();
+  if (pointer) return expand(pointer);
+  return path.join(repoDir, 'data');
+}
+
 export const config = {
   appDir,
   serverDir,
   repoDir,
   host: args.host || process.env.HOST || '127.0.0.1',
   port: Number(args.port || process.env.PORT || 8000),
-  dataDir: path.resolve(args.dataDir || process.env.JSONM_DATA_DIR || path.join(repoDir, 'data')),
+  /** Mutable: the Settings tab can point the app at another folder. */
+  dataDir: initialDataDir(),
+  /** True while the value comes from --data-dir / JSONM_DATA_DIR. */
+  dataDirLocked: Boolean(args.dataDir || process.env.JSONM_DATA_DIR),
   /**
    * Optional jail: when set, the folder explorer and the hash runner refuse to
    * leave this directory. `null` means the whole local filesystem is browsable,
@@ -59,14 +96,71 @@ export const config = {
   home: os.homedir(),
 };
 
-/** Absolute paths of everything the app reads or writes. */
+export const defaultDataDir = path.join(repoDir, 'data');
+
+/**
+ * Turn whatever the user typed into an absolute path. `~` and relative paths
+ * are expanded; an empty value means "use the default folder".
+ */
+export function resolveDataFolder(value) {
+  const raw = String(value ?? '').trim();
+  return raw === '' ? defaultDataDir : expand(raw);
+}
+
+/**
+ * Point the app at another data folder. Everything below resolves `files`
+ * lazily, so this takes effect immediately; the caller is responsible for
+ * dropping caches (see resetSchemaCache in validate.js).
+ */
+export function setDataDir(next) {
+  config.dataDir = resolveDataFolder(next);
+  return config.dataDir;
+}
+
+/**
+ * Remember the data folder in the pointer file. Stored as given, so a relative
+ * path or ~ keeps working after a move.
+ */
+export function writeDataFolderPointer(value) {
+  const raw = String(value ?? '').trim();
+  const resolved = expand(raw || defaultDataDir);
+  const payload = { dataFolder: raw, resolved, updatedAt: new Date().toISOString() };
+  if (raw === '') {
+    rmSync(dataFolderPointer, { force: true });
+  } else {
+    writeFileSync(dataFolderPointer, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  }
+  return payload;
+}
+
+/** The value shown in Settings: what the user typed, or '' when defaulted. */
+export function dataFolderSetting() {
+  const pointer = readDataFolderPointer();
+  return {
+    value: pointer,
+    resolved: config.dataDir,
+    isDefault: pointer === '',
+    locked: config.dataDirLocked,
+    pointerFile: dataFolderPointer,
+    defaultDir: defaultDataDir,
+  };
+}
+
+/** Absolute paths of everything the app reads or writes, resolved on access. */
 export const files = {
-  /** Folder holding one JSON file per agent record. */
-  agentsDir: path.join(config.dataDir, 'agents'),
-  schema: path.join(config.dataDir, 'agents.schema.json'),
-  hashes: path.join(config.dataDir, 'hashes.json'),
-  /** UI state that outlives a reload, e.g. the last hashed folder. */
-  state: path.join(config.dataDir, 'state.json'),
-  /** Settings chosen in the Settings tab, e.g. the workspace folder. */
-  settings: path.join(config.dataDir, 'settings.json'),
+  get agentsDir() {
+    return path.join(config.dataDir, 'agents');
+  },
+  get schema() {
+    return path.join(config.dataDir, 'agents.schema.json');
+  },
+  get hashes() {
+    return path.join(config.dataDir, 'hashes.json');
+  },
+  get state() {
+    return path.join(config.dataDir, 'state.json');
+  },
+  get settings() {
+    return path.join(config.dataDir, 'settings.json');
+  },
 };

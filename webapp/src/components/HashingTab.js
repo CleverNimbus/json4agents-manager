@@ -1,4 +1,4 @@
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import DataTable from './DataTable.js';
 import FolderPicker from './FolderPicker.js';
 import HashDetail from './HashDetail.js';
@@ -171,6 +171,15 @@ export default {
       const target = path.value.trim();
       if (target !== '') rememberHashFolder(target);
     };
+
+    // A data folder change swaps state.json underneath us. Take the folder
+    // remembered there unless the user already typed or hashed something.
+    watch(
+      () => store.revision,
+      () => {
+        if (path.value.trim() === '') path.value = store.hashJob.root || store.state.hashTab.lastFolder || '';
+      },
+    );
 
     return {
       cancelHash,

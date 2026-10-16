@@ -32,7 +32,7 @@ function sanitise(raw) {
   return state;
 }
 
-const file = createStateFile({ file: files.settings, defaults: DEFAULTS, sanitise });
+const file = createStateFile({ getPath: () => files.settings, defaults: DEFAULTS, sanitise });
 
 export const readSettings = () => file.read();
 

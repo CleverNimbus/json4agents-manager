@@ -17,6 +17,14 @@ import { files } from './config.js';
 /** @type {Promise<{ schema: object, collection: Function, record: Function }> | null} */
 let compiled = null;
 
+/**
+ * Drop the compiled schema. Required when the data folder changes, otherwise
+ * the app would keep validating against the previous folder's schema.
+ */
+export function resetSchemaCache() {
+  compiled = null;
+}
+
 export function loadSchema() {
   if (!compiled) {
     compiled = (async () => {
@@ -27,7 +35,12 @@ export function loadSchema() {
       const record = ajv.getSchema(`${schema.$id ?? ''}#/$defs/agent`) ?? ajv.getSchema('#/$defs/agent');
       if (!record) throw new Error('agents.schema.json has no $defs/agent definition');
       return { schema, collection, record };
-    })();
+    })().catch((err) => {
+      // Never keep a rejected compile cached: fixing the file (or switching the
+      // data folder) has to work without restarting the server.
+      compiled = null;
+      throw err;
+    });
   }
   return compiled;
 }

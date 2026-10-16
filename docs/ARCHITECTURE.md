@@ -144,7 +144,23 @@ data/
   hashes.json           file and folder hash history
   state.json            last hashed folder (session memory)      [gitignored]
   settings.json         workspace folder + git root (config)     [gitignored]
+data-location.json      which folder is the data folder          [gitignored]
 ```
+
+The data folder itself is a setting, so it cannot be stored inside the data
+folder - it lives in `data-location.json` next to `package.json`. Startup
+precedence is `--data-dir` / `JSONM_DATA_DIR` > that file > `<repo>/data`.
+
+**Everything that touches a data path resolves it lazily.** `config.files`
+exposes getters and `createStateFile` takes a `getPath()` function, so
+`setDataDir()` in the Settings tab changes where the whole app reads and writes
+without a restart. One cache does not follow automatically: the compiled Ajv
+schema, cleared through `resetSchemaCache()` on every switch. It is also cleared
+when compilation *fails*, so fixing a broken schema does not require a restart.
+
+Switching is all-or-nothing (`server/dataFolderApi.js`): the target folder is
+created, a missing `agents.schema.json` is copied over from the current folder,
+and only then does the app move. A failure leaves the previous folder in use.
 
 `state.json` and `settings.json` are gitignored because they hold absolute paths
 from this machine. Both are optional at runtime: a missing, empty or malformed
@@ -209,6 +225,7 @@ observation even when content is unchanged.
 | `GET /api/hashes` | current hashes.json |
 | `GET`/`PUT /api/state` | session memory (last hashed folder) |
 | `GET`/`PUT /api/settings` | workspace folder + git root |
+| `GET`/`PUT /api/data-folder` | the data folder, and switching it |
 
 All errors are JSON: `{ error, errors?: [{ field \| path, message }] }`.
 Unknown routes return `404` as JSON, not HTML.
@@ -272,8 +289,10 @@ as `CODE - Name`; the button appends the selected paths to that agent's
 
 ### Settings
 
-Two fields configured as a pair - **workspace folder** and **workspace git root
-location** - validated in `server/settingsValidation.js`:
+Three blocks. Two of them configure the workspace, one of them configures the app.
+
+**Workspace folder** and **workspace git root location** - configured as a pair,
+validated in `server/settingsValidation.js`:
 
 - both empty: allowed
 - only one set: refused, naming the missing field
@@ -289,6 +308,15 @@ Every successful save bumps `store.settings.revision`, and `LinkChangesTab`
 watches that counter to re-run `git status`. Tabs are mounted once and toggled
 with `v-show`, so a folder change refreshes the dependent tab even while the
 user is on another one. Follow that pattern for any view derived from settings.
+
+**Data folder** - where the app keeps its JSON files, defaulting to
+`<repo>/data`. Saving it calls `reloadAll()` in `src/store.js`, which drops the
+client caches, re-reads agents / schema / hashes / state / settings and bumps
+both `store.revision` and `store.settings.revision`, so every open tab shows the
+new folder. `HashingTab` watches `store.revision` to pick up the remembered
+folder from the new `state.json`. A loader that fails during the reload is
+reported in the banner rather than silently leaving the previous folder's rows
+on screen.
 
 ## 8. Conventions worth keeping
 

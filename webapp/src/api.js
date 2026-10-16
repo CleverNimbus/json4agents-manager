@@ -44,6 +44,15 @@ export const saveState = (patch) =>
 
 export const getSettings = () => request('/api/settings');
 
+export const getDataFolder = () => request('/api/data-folder');
+
+export const saveDataFolder = (dataFolder) =>
+  request('/api/data-folder', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dataFolder }),
+  });
+
 export const saveSettings = (patch) =>
   request('/api/settings', {
     method: 'PUT',

@@ -12,6 +12,12 @@ export const store = reactive({
   activeTab: 'agents',
   banner: null,
 
+  /**
+   * Bumped whenever the data source underneath the app changes (the data folder
+   * setting). Tabs that keep local copies of what they showed watch this.
+   */
+  revision: 0,
+
   agents: {
     /** Folder holding one JSON file per agent. */
     dir: '',
@@ -47,6 +53,17 @@ export const store = reactive({
     loaded: false,
     /** Bumped on every successful save; views that depend on it watch this. */
     revision: 0,
+  },
+
+  /** Where the app keeps its JSON files; from data-location.json. */
+  dataFolder: {
+    value: '',
+    resolved: '',
+    isDefault: true,
+    locked: false,
+    pointerFile: '',
+    defaultDir: '',
+    loaded: false,
   },
 
   hashJob: {
@@ -93,6 +110,70 @@ export function setBanner(kind, text) {
 }
 
 export const clearBanner = () => setBanner('info', '');
+
+/**
+ * Forget everything that was read from the data folder. Used before a reload
+ * after the data folder changed, so nothing from the old folder lingers.
+ */
+function invalidateDataCaches() {
+  store.schema = null;
+  store.agents.loaded = false;
+  store.hashes.loaded = false;
+  store.state.loaded = false;
+  store.settings.loaded = false;
+}
+
+/**
+ * Re-read agents, schema, hashes, state and settings from the data folder.
+ * Anything that cannot be read is reported: after a folder switch, silently
+ * keeping the previous folder's rows would be worse than an error.
+ */
+export async function reloadAll() {
+  invalidateDataCaches();
+  const loaders = [
+    ['agents', loadAgents],
+    ['schema', loadSchema],
+    ['hashes', loadHashes],
+    ['state', loadState],
+    ['settings', loadSettings],
+  ];
+  const failures = [];
+  for (const [name, load] of loaders) {
+    try {
+      await load();
+    } catch (err) {
+      failures.push(`${name}: ${err.message}`);
+    }
+  }
+  // Tabs watch these; bumping them makes every open tab show the new folder.
+  store.revision += 1;
+  store.settings.revision += 1;
+  if (failures.length > 0) {
+    setBanner('error', `Switched data folder, but some data could not be read — ${failures.join(' · ')}`);
+  }
+  return store;
+}
+
+export async function loadDataFolder() {
+  try {
+    const info = await api.getDataFolder();
+    Object.assign(store.dataFolder, info, { loaded: true });
+  } catch {
+    store.dataFolder.loaded = true;
+  }
+  return store.dataFolder;
+}
+
+/**
+ * Point the app at another data folder, then reload every tab. An empty value
+ * goes back to the default <repo>/data.
+ */
+export async function saveDataFolder(value) {
+  const info = await api.saveDataFolder(String(value ?? '').trim());
+  Object.assign(store.dataFolder, info, { loaded: true });
+  await reloadAll();
+  return store.dataFolder;
+}
 
 export async function loadSchema() {
   if (store.schema) return store.schema;

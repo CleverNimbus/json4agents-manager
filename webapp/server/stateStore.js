@@ -21,7 +21,7 @@ function sanitise(raw) {
   return state;
 }
 
-const file = createStateFile({ file: files.state, defaults: DEFAULTS, sanitise });
+const file = createStateFile({ getPath: () => files.state, defaults: DEFAULTS, sanitise });
 
 export const readState = () => file.read();
 

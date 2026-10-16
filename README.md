@@ -19,7 +19,7 @@ Options (also available as `PORT` / `JSONM_DATA_DIR` / `HOST`):
 | --- | --- | --- |
 | `--port 9000` | port to listen on | `8000` |
 | `--host 0.0.0.0` | interface to bind | `127.0.0.1` |
-| `--data-dir /path` | where the data directory lives | `<repo>/data` |
+| `--data-dir /path` | see *Data folder* below | `<repo>/data` |
 | `--root ~/projects` | jail: browsing and hashing stop at this folder | unrestricted |
 
 `npm run dev` does the same with `node --watch`, so the server restarts when a
@@ -131,6 +131,17 @@ field that caused the refusal is highlighted in the tab. Pick a folder with
 and *Clear both* empties the pair. Saving either field refreshes the
 *Link Changes to Agent* tab immediately, since its file list depends on both.
 
+- **Data folder** - where the app keeps its JSON files. Empty means
+  `<repo>/data`. A folder that does not exist yet is created, and a missing
+  `agents.schema.json` is copied over from the current folder so the new one can
+  validate anything. Changing it reloads every tab, so the other tabs show the
+  new folder's agents, hashes and state at once.
+  The value cannot live inside the data folder - moving the folder would move
+  the setting that points at it - so it is remembered in `data-location.json`
+  next to `package.json` (git ignored). Startup precedence is
+  `--data-dir` / `JSONM_DATA_DIR` > this setting > `<repo>/data`; when the flag
+  is used the setting shows as *locked* and refuses to change.
+
 **Link Changes to Agent** - the files git still reports as changed inside the
 workspace folder, linked to an agent in one click. This tab is the first
 consumer of the two settings above.
@@ -206,6 +217,8 @@ observation, even when the content did not change.
 | `PUT /api/state` | merge a patch into `state.json` |
 | `GET /api/settings` | `settings.json` (workspace folder and git root) |
 | `PUT /api/settings` | validate, then merge a patch into `settings.json` |
+| `GET /api/data-folder` | the data folder setting and the folder in use |
+| `PUT /api/data-folder` | switch data folder, carrying the schema over if needed |
 | `GET /api/fs?path=…` | one directory listing for the folder browser |
 | `POST /api/hash` | `{path, includeHidden, followSymlinks}` → newline delimited JSON progress stream |
 
@@ -231,6 +244,7 @@ webapp/server/
   settingsStore.js            data/settings.json, tolerant of a broken file
   settingsValidation.js        workspace/git root rules enforced on save
   settingsApi.js              GET/PUT /api/settings
+  dataFolderApi.js            GET/PUT /api/data-folder, switch + schema carry-over
   fsApi.js                    GET /api/fs, path resolution and root jail
   hashRunner.js               walk, parallel SHA-256, folder rollups
   hashApi.js                  POST /api/hash progress stream, GET /api/hashes

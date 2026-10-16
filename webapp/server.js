@@ -16,6 +16,7 @@ import express from 'express';
 import { appDir, config, files } from './server/config.js';
 import { agentsRouter } from './server/agentsApi.js';
 import { changesRouter } from './server/changesApi.js';
+import { dataFolderRouter } from './server/dataFolderApi.js';
 import { fsRouter } from './server/fsApi.js';
 import { hashRouter } from './server/hashApi.js';
 import { settingsRouter } from './server/settingsApi.js';
@@ -58,6 +59,7 @@ app.use('/src', express.static(path.join(appDir, 'src')));
 
 app.use(agentsRouter);
 app.use(changesRouter);
+app.use(dataFolderRouter);
 app.use(fsRouter);
 app.use(hashRouter);
 app.use(stateRouter);
@@ -75,7 +77,7 @@ app.use((err, req, res, next) => {
 
 app.listen(config.port, config.host, () => {
   console.log(`JSON Manager  ->  http://${config.host}:${config.port}`);
-  console.log(`  data dir    : ${config.dataDir}`);
+  console.log(`  data dir    : ${config.dataDir}${config.dataDirLocked ? '  (fixed by --data-dir)' : ''}`);
   console.log(`  agents      : ${files.agentsDir}/*.json`);
   console.log(`  schema      : ${files.schema}`);
   console.log(`  hashes      : ${files.hashes}`);

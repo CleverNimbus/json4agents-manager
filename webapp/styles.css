@@ -782,6 +782,16 @@ table.grid td.col-select {
   margin: 8px 0 0;
 }
 
+.setting-resolved {
+  margin: 10px 0 0;
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+
+.setting-resolved .mono {
+  color: var(--text-dim);
+}
+
 .setting-error {
   margin: 12px 0 0;
   color: var(--bad);
