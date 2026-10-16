@@ -45,6 +45,8 @@ export const store = reactive({
     gitRoot: '',
     updatedAt: '',
     loaded: false,
+    /** Bumped on every successful save; views that depend on it watch this. */
+    revision: 0,
   },
 
   hashJob: {
@@ -248,6 +250,9 @@ export async function saveSettings(patch) {
   store.settings.gitRoot = settings.gitRoot;
   store.settings.updatedAt = settings.updatedAt;
   store.settings.loaded = true;
+  // Anything derived from the workspace (the changes tab) watches this and
+  // reloads, so switching folders takes effect immediately.
+  store.settings.revision += 1;
   return store.settings;
 }
 

@@ -254,6 +254,9 @@ sortable and filterable.
 
 - **Yellow dot** in the first column: the row's newest hash differs from the
   previously recorded one.
+- **The `● N changed` badge is a filter switch**: clicking it hides unchanged
+  rows so only the dotted ones remain (`changedOnly` in `HashingTab.js`). It is
+  hidden in the Runs view, where rows are scans and carry no change flag.
 - **Click a row** (Files/Folders only; Runs rows are not clickable) to open
   `HashDetail`, listing every hash newest-first with its date.
 
@@ -281,6 +284,11 @@ location** - validated in `server/settingsValidation.js`:
 The patch is merged with what is stored *before* validation, so saving one
 field is checked against the other. Saves happen on blur, Enter, picker
 selection or *Save*; *Clear both* empties the pair.
+
+Every successful save bumps `store.settings.revision`, and `LinkChangesTab`
+watches that counter to re-run `git status`. Tabs are mounted once and toggled
+with `v-show`, so a folder change refreshes the dependent tab even while the
+user is on another one. Follow that pattern for any view derived from settings.
 
 ## 8. Conventions worth keeping
 

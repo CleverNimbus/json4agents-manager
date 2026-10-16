@@ -93,6 +93,10 @@ untouched. Below the toolbar the same file can be viewed as **Files**,
 
 - **Yellow dot** - the row's newest hash differs from the one recorded before
   it. Click a row to see the history behind it.
+- **`● N changed` is a switch** - click it to hide unchanged rows and leave only
+  the yellow-dotted ones, click again to show everything. The `N rows` badge
+  follows. The switch is hidden in the Runs view, where rows are scans rather
+  than files and carry no change flag.
 - **Click a file or folder row** to open its hash history: every recorded hash
   with the date it was hashed, newest first, the newest one badged *latest*.
 - **Rows in the Runs view are not clickable** - a run is a scan of a folder, not
@@ -112,8 +116,8 @@ untouched. Below the toolbar the same file can be viewed as **Files**,
 - **Workspace folder** - the folder this workspace works in.
 - **Workspace git root location** - the git repository the workspace belongs to.
 
-Both are stored for later use - no tab reads them yet - but they are only
-accepted as a valid pair:
+Both are stored in `data/settings.json`. The *Link Changes to Agent* tab reads
+them, and they are only accepted as a valid pair:
 
 - both empty - nothing configured, allowed
 - only one filled in - refused; the two are configured together
@@ -124,7 +128,8 @@ accepted as a valid pair:
 The rules live in `server/settingsValidation.js` and are enforced on save; the
 field that caused the refusal is highlighted in the tab. Pick a folder with
 *Browse…*; changes are saved when you leave a box, press Enter or press *Save*,
-and *Clear both* empties the pair.
+and *Clear both* empties the pair. Saving either field refreshes the
+*Link Changes to Agent* tab immediately, since its file list depends on both.
 
 **Link Changes to Agent** - the files git still reports as changed inside the
 workspace folder, linked to an agent in one click. This tab is the first

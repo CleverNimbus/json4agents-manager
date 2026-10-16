@@ -428,6 +428,28 @@ table.grid td.col-mark {
   border-color: #4a3c14;
 }
 
+/* The "N changed" badge doubles as a filter switch. */
+.badge.toggle {
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  color: #e3b341;
+  border-color: #4a3c14;
+  background: #201c10;
+}
+
+.badge.toggle:hover {
+  border-color: #6b5620;
+  background: #2a2414;
+}
+
+.badge.toggle.active {
+  color: #12100a;
+  background: #e3b341;
+  border-color: #e3b341;
+  font-weight: 600;
+}
+
 .badge.latest-badge {
   color: var(--good);
   border-color: #1d3a24;

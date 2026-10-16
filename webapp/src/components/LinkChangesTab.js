@@ -3,7 +3,7 @@
  * selectable, linked to an agent's result_generated_files as paths relative to
  * the workspace git root.
  */
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import DataTable from './DataTable.js';
 import { formatBytes } from '../format.js';
 import * as api from '../api.js';
@@ -40,6 +40,16 @@ export default {
       if (!store.agents.loaded) await loadAgents().catch((err) => setBanner('error', err.message));
       await reload();
     });
+
+    // The workspace folder and git root come from Settings. Whenever one of
+    // them is saved, re-ask git so this list matches the new workspace without
+    // the user having to press Refresh.
+    watch(
+      () => store.settings.revision,
+      () => {
+        reload();
+      },
+    );
 
     async function reload() {
       loading.value = true;

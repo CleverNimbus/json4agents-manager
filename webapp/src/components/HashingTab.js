@@ -70,6 +70,8 @@ export default {
     const followSymlinks = ref(false);
     const view = ref('files');
     const filter = ref('');
+    /** Show only the rows whose hash changed since the previous recorded one. */
+    const changedOnly = ref(false);
     const picker = reactive({ open: false });
     /** Row whose hash history is open, null when the popup is closed. */
     const detail = ref(null);
@@ -118,9 +120,19 @@ export default {
 
     const visibleRows = computed(() => {
       const needle = filter.value.trim().toLowerCase();
-      if (needle === '') return rows.value;
-      return rows.value.filter((row) => String(row.path ?? row.root ?? '').toLowerCase().includes(needle));
+      let result = rows.value;
+      // The changed filter only makes sense where rows carry a change flag;
+      // the Runs view describes scans, not files.
+      if (changedOnly.value && view.value !== 'runs') result = result.filter((row) => row.changed);
+      if (needle === '') return result;
+      return result.filter((row) => String(row.path ?? row.root ?? '').toLowerCase().includes(needle));
     });
+
+    /** The toggle is only meaningful for the file and folder views. */
+    const showChangedToggle = computed(() => view.value !== 'runs' && changedCount.value > 0);
+    const toggleChangedOnly = () => {
+      changedOnly.value = !changedOnly.value;
+    };
 
     const columns = computed(() => views.find((entry) => entry.id === view.value).columns);
     const rowKey = computed(() => (view.value === 'runs' ? 'finishedAt' : 'path'));
@@ -163,6 +175,7 @@ export default {
     return {
       cancelHash,
       changedCount,
+      changedOnly,
       chooseFolder,
       clickable,
       columns,
@@ -178,7 +191,9 @@ export default {
       picker,
       rowKey,
       run,
+      showChangedToggle,
       store,
+      toggleChangedOnly,
       view,
       views,
       visibleRows,
@@ -224,10 +239,18 @@ export default {
           >{{ entry.label }}</button>
         </div>
         <input v-model="filter" class="filter" type="search" placeholder="Filter by path …" />
+        <button
+          v-if="showChangedToggle"
+          type="button"
+          class="badge toggle"
+          :class="{ active: changedOnly }"
+          :aria-pressed="changedOnly"
+          :title="changedOnly ? 'Showing changed files only — click to show all' : 'Click to hide unchanged files'"
+          @click="toggleChangedOnly"
+        >
+          ● {{ changedCount }} changed
+        </button>
         <span class="spacer"></span>
-        <span class="badge changed-badge" v-if="changedCount > 0" :title="'Latest hash differs from the previously recorded one'">
-          {{ changedCount }} changed
-        </span>
         <span class="badge">{{ visibleRows.length }} rows</span>
         <span class="badge" :title="store.hashes.file">{{ store.hashes.file }}</span>
       </div>

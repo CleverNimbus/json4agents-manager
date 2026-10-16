@@ -116,8 +116,9 @@ export default {
         </header>
 
         <p class="setting-note">
-          Both fields are stored in <span class="mono">{{ store.settings.file }}</span> for later use -
-          no tab reads them yet, so changing them does not affect the agents or the hashing tab.
+          Both fields are stored in <span class="mono">{{ store.settings.file }}</span>.
+          The <em>Link Changes to Agent</em> tab reads them to list the uncommitted git
+          files of the workspace folder; nothing else uses them yet.
         </p>
 
         <div class="setting-field" v-for="field in FIELDS" :key="field.key" :class="{ invalid: errors[field.key] }">
