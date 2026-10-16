@@ -38,14 +38,15 @@ data/
     AG-003.json
   hashes.json           hash results
   state.json            UI state, e.g. the last folder used in the hashing tab
+  settings.json         settings chosen in the Settings tab
 ```
 
 Writes go through a temporary file plus `rename()`, so an interrupted write can
 never truncate a file.
 
-`state.json` is machine specific, so it is git ignored. It is also optional: a
-missing, empty or malformed one falls back to the defaults instead of breaking
-the app.
+`state.json` and `settings.json` are machine specific, so they are git ignored.
+Both are also optional: a missing, empty or malformed one falls back to the
+defaults instead of breaking the app.
 
 ### The agent store
 
@@ -105,6 +106,48 @@ untouched. Below the toolbar the same file can be viewed as **Files**,
   it in the box. An interrupted hash run wins over the stored value, so a reload
   mid-run does not lose the target.
 
+**Settings** - configuration that outlives a session, kept in
+`data/settings.json`:
+
+- **Workspace folder** - the folder this workspace works in.
+- **Workspace git root location** - the git repository the workspace belongs to.
+
+Both are stored for later use - no tab reads them yet - but they are only
+accepted as a valid pair:
+
+- both empty - nothing configured, allowed
+- only one filled in - refused; the two are configured together
+- the git root must be a folder containing a git repository (`.git`, either a
+  folder or a file as in a worktree checkout)
+- the workspace folder must be that git root itself or a folder inside it
+
+The rules live in `server/settingsValidation.js` and are enforced on save; the
+field that caused the refusal is highlighted in the tab. Pick a folder with
+*Browse…*; changes are saved when you leave a box, press Enter or press *Save*,
+and *Clear both* empties the pair.
+
+**Link Changes to Agent** - the files git still reports as changed inside the
+workspace folder, linked to an agent in one click. This tab is the first
+consumer of the two settings above.
+
+- Reads `git status --porcelain --untracked-files=all` at the workspace git
+  root. Modified, staged, added, renamed and untracked files are listed;
+  deleted and unmerged paths are skipped, as is anything outside the workspace
+  folder.
+- The grid shows the path **relative to the git root** (what actually gets
+  stored), the git status, the path relative to the workspace folder and the
+  size. Each row has a checkbox, with *Select all* and *Select none* always
+  available and an `N changed / N selected` badge.
+- Pick an agent from the dropdown (`CODE - Name`, read from the agent store)
+  and press **Link changes to agent**. Every checked file is appended to that
+  agent's `result_generated_files`, skipping paths already listed; the agent is
+  validated and written exactly like an edit from the agents tab.
+- Paths must be relative to the git root - absolute paths and `..` segments are
+  rejected. Linked files stay in the list, because they are still uncommitted;
+  commit them and they disappear on the next refresh.
+- Without a workspace configured the tab explains what to set instead of
+  showing an empty grid.
+
 ## Hashing details
 
 - SHA-256, streamed per file, 8 files in parallel. Throughput on this machine:
@@ -151,9 +194,13 @@ observation, even when the content did not change.
 | `PUT /api/agents/:code` | update that file; renames it when the code changed |
 | `DELETE /api/agents/:code` | remove the file |
 | `GET /api/schema` | the JSON Schema, used to build the edit form |
+| `GET /api/changes` | uncommitted git files inside the workspace folder |
+| `POST /api/agents/:code/link-files` | add paths to that agent's `result_generated_files` |
 | `GET /api/hashes` | current `hashes.json` |
 | `GET /api/state` | `state.json` (e.g. the last hashed folder) |
 | `PUT /api/state` | merge a patch into `state.json` |
+| `GET /api/settings` | `settings.json` (workspace folder and git root) |
+| `PUT /api/settings` | validate, then merge a patch into `settings.json` |
 | `GET /api/fs?path=…` | one directory listing for the folder browser |
 | `POST /api/hash` | `{path, includeHidden, followSymlinks}` → newline delimited JSON progress stream |
 
@@ -168,9 +215,17 @@ webapp/server/
   store.js                    read/write JSON, atomic writes
   validate.js                 Ajv 2020-12: record and collection validators
   agentsStore.js              one JSON file per agent in data/agents/
-  agentsApi.js                CRUD for the agent files, GET /api/schema
+  agentsApi.js                CRUD for the agent files, GET /api/schema,
+                              POST /api/agents/:code/link-files
+  agentsValidation.js          one agent record + its collection, shared by both
+  gitChanges.js               git status of the workspace folder, relative to the git root
+  changesApi.js               GET /api/changes
+  stateFile.js                shared read/write/atomic-write helper for the two small files
   stateStore.js               data/state.json, tolerant of a broken file
   stateApi.js                 GET/PUT /api/state
+  settingsStore.js            data/settings.json, tolerant of a broken file
+  settingsValidation.js        workspace/git root rules enforced on save
+  settingsApi.js              GET/PUT /api/settings
   fsApi.js                    GET /api/fs, path resolution and root jail
   hashRunner.js               walk, parallel SHA-256, folder rollups
   hashApi.js                  POST /api/hash progress stream, GET /api/hashes
@@ -180,7 +235,7 @@ webapp/styles.css
 webapp/src/                   browser app (no build step)
   main.js  api.js  store.js  format.js
   components/  App  AgentsTab  AgentModal  HashingTab  HashDetail
-                FolderPicker  DataTable
+                LinkChangesTab  FolderPicker  SettingsTab  DataTable
 ```
 
 ## Dependencies

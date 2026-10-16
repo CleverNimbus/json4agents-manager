@@ -38,6 +38,15 @@ export const store = reactive({
     loaded: false,
   },
 
+  /** Settings from the Settings tab, persisted in data/settings.json. */
+  settings: {
+    file: '',
+    workspaceFolder: '',
+    gitRoot: '',
+    updatedAt: '',
+    loaded: false,
+  },
+
   hashJob: {
     running: false,
     phase: 'idle', // idle | scanning | hashing | writing | done | cancelled | error
@@ -80,6 +89,8 @@ let hashController = null;
 export function setBanner(kind, text) {
   store.banner = text ? { kind, text } : null;
 }
+
+export const clearBanner = () => setBanner('info', '');
 
 export async function loadSchema() {
   if (store.schema) return store.schema;
@@ -208,6 +219,36 @@ export async function loadState() {
   }
   store.state.loaded = true;
   return store.state;
+}
+
+export async function loadSettings() {
+  if (store.settings.loaded) return store.settings;
+  try {
+    const { file, settings } = await api.getSettings();
+    store.settings.file = file;
+    store.settings.workspaceFolder = settings?.workspaceFolder ?? '';
+    store.settings.gitRoot = settings?.gitRoot ?? '';
+    store.settings.updatedAt = settings?.updatedAt ?? '';
+  } catch {
+    /* defaults are fine */
+  }
+  store.settings.loaded = true;
+  return store.settings;
+}
+
+/**
+ * Store the workspace settings. No feature reads them yet, so they are not
+ * checked against the filesystem here - the server enforces the git rules.
+ *
+ * @param {{ workspaceFolder: string, gitRoot: string }} patch
+ */
+export async function saveSettings(patch) {
+  const { settings } = await api.saveSettings(patch);
+  store.settings.workspaceFolder = settings.workspaceFolder;
+  store.settings.gitRoot = settings.gitRoot;
+  store.settings.updatedAt = settings.updatedAt;
+  store.settings.loaded = true;
+  return store.settings;
 }
 
 function onHashEvent(event) {

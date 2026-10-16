@@ -15,8 +15,10 @@ import path from 'node:path';
 import express from 'express';
 import { appDir, config, files } from './server/config.js';
 import { agentsRouter } from './server/agentsApi.js';
+import { changesRouter } from './server/changesApi.js';
 import { fsRouter } from './server/fsApi.js';
 import { hashRouter } from './server/hashApi.js';
+import { settingsRouter } from './server/settingsApi.js';
 import { stateRouter } from './server/stateApi.js';
 
 const require = createRequire(import.meta.url);
@@ -55,9 +57,11 @@ app.get('/styles.css', (req, res) => res.sendFile(path.join(appDir, 'styles.css'
 app.use('/src', express.static(path.join(appDir, 'src')));
 
 app.use(agentsRouter);
+app.use(changesRouter);
 app.use(fsRouter);
 app.use(hashRouter);
 app.use(stateRouter);
+app.use(settingsRouter);
 
 app.use((req, res) => {
   res.status(404).json({ error: `No route for ${req.method} ${req.path}` });

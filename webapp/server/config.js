@@ -67,4 +67,6 @@ export const files = {
   hashes: path.join(config.dataDir, 'hashes.json'),
   /** UI state that outlives a reload, e.g. the last hashed folder. */
   state: path.join(config.dataDir, 'state.json'),
+  /** Settings chosen in the Settings tab, e.g. the workspace folder. */
+  settings: path.join(config.dataDir, 'settings.json'),
 };

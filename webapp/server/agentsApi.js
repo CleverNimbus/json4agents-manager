@@ -12,6 +12,7 @@
  * store that somehow holds conflicting records is still caught.
  */
 import { Router } from 'express';
+import path from 'node:path';
 import { files } from './config.js';
 import {
   AgentStoreError,
@@ -22,22 +23,11 @@ import {
   readAgent,
   updateAgent,
 } from './agentsStore.js';
+import { checkAgent } from './agentsValidation.js';
+import { readSettings } from './settingsStore.js';
 import { loadSchema, validateAgentCollection, validateAgentRecord } from './validate.js';
 
 export const agentsRouter = Router();
-
-/** Validate one record, then the collection it would belong to. */
-async function checkAgent(agent, previousCode) {
-  const record = await validateAgentRecord(agent);
-  if (!record.valid) return record;
-
-  // Replace the record being edited (old code and/or new code) in the
-  // collection, so the check sees the state the store would be left in.
-  const replaced = new Set([previousCode, agent?.code].filter(Boolean));
-  const { records } = await listAgents();
-  const others = records.filter((entry) => !replaced.has(entry?.code));
-  return validateAgentCollection([...others, agent]);
-}
 
 agentsRouter.get('/api/agents', async (req, res) => {
   const { records, issues } = await listAgents();
@@ -82,6 +72,58 @@ agentsRouter.put('/api/agents/:code', async (req, res) => {
 agentsRouter.delete('/api/agents/:code', async (req, res) => {
   const code = await deleteAgent(req.params.code);
   return res.json({ ok: true, deleted: code });
+});
+
+/**
+ * Link uncommitted files to an agent: adds each path to the agent's
+ * result_generated_files, keeping the order and skipping paths already listed.
+ * Paths must be relative to the configured git root.
+ */
+agentsRouter.post('/api/agents/:code/link-files', async (req, res) => {
+  const { paths } = req.body ?? {};
+  if (!Array.isArray(paths)) {
+    return res.status(400).json({ error: 'Expected { "paths": ["relative/path", …] }' });
+  }
+  for (const entry of paths) {
+    if (typeof entry !== 'string' || entry.trim() === '') {
+      return res.status(400).json({ error: 'Every path must be a non empty string' });
+    }
+    if (path.isAbsolute(entry) || entry.split(/[\\/]/).includes('..')) {
+      return res.status(400).json({ error: `Path must be relative to the git root: ${entry}` });
+    }
+  }
+
+  const { gitRoot } = await readSettings();
+  const agent = await readAgent(req.params.code);
+  const existing = Array.isArray(agent.result_generated_files) ? agent.result_generated_files : [];
+  const known = new Set(existing);
+
+  const added = [];
+  for (const entry of paths.map((value) => value.trim())) {
+    if (known.has(entry)) continue;
+    known.add(entry);
+    added.push(entry);
+  }
+
+  if (added.length === 0) {
+    return res.json({ ok: true, file: pathFor(agent.code), agent, added: [], alreadyPresent: paths.length, gitRoot });
+  }
+
+  const updated = { ...agent, result_generated_files: [...existing, ...added] };
+  const checked = await checkAgent(updated, agent.code);
+  if (!checked.valid) {
+    return res.status(400).json({ error: 'The agent would not match the schema', errors: checked.errors });
+  }
+
+  const saved = await updateAgent(agent.code, updated);
+  return res.json({
+    ok: true,
+    file: pathFor(saved.code),
+    agent: saved,
+    added,
+    alreadyPresent: paths.length - added.length,
+    gitRoot,
+  });
 });
 
 agentsRouter.get('/api/schema', async (req, res) => {

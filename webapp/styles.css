@@ -608,6 +608,164 @@ table.grid td.empty {
   padding-left: 18px;
 }
 
+/* -------------------------------------------------------- link changes */
+
+.panel-note {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+}
+
+.panel-note.warn {
+  border-left-color: var(--warn);
+  color: #ffe4a8;
+}
+
+.panel-note .mono {
+  color: var(--text);
+}
+
+table.grid th.col-select,
+table.grid td.col-select {
+  width: 34px;
+  min-width: 34px;
+  max-width: 34px;
+  padding-left: 12px;
+  padding-right: 4px;
+  text-align: center;
+}
+
+.row-check {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.link-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  padding: 14px 16px;
+}
+
+.link-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.link-row label {
+  color: var(--text-dim);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.agent-select {
+  flex: 1;
+  min-width: 280px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.link-note {
+  margin: 10px 0 0;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.link-note .mono {
+  color: var(--text-dim);
+}
+
+/* ------------------------------------------------------------- settings */
+
+.setting-block {
+  max-width: 860px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px 20px 20px;
+}
+
+.setting-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.setting-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.setting-note {
+  margin: 0 0 14px;
+  color: var(--text-faint);
+  font-size: 12.5px;
+}
+
+.setting-note .mono {
+  color: var(--text-dim);
+}
+
+.setting-field {
+  padding: 12px 0 4px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.setting-field label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 3px;
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.setting-field .req {
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--warn);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.setting-field .hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.setting-field.invalid input {
+  border-color: var(--bad);
+}
+
+.setting-field .setting-error {
+  margin: 8px 0 0;
+}
+
+.setting-error {
+  margin: 12px 0 0;
+  color: var(--bad);
+  font-size: 12.5px;
+}
+
 /* ---------------------------------------------------------- hash history */
 
 .modal.history {

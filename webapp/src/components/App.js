@@ -1,14 +1,18 @@
 import AgentsTab from './AgentsTab.js';
 import HashingTab from './HashingTab.js';
+import LinkChangesTab from './LinkChangesTab.js';
+import SettingsTab from './SettingsTab.js';
 import { store } from '../store.js';
 
 export default {
   name: 'JsonManagerApp',
-  components: { AgentsTab, HashingTab },
+  components: { AgentsTab, HashingTab, LinkChangesTab, SettingsTab },
   setup() {
     const tabs = [
       { id: 'agents', label: 'Agents' },
       { id: 'hashing', label: 'Hashing' },
+      { id: 'link', label: 'Link Changes to Agent' },
+      { id: 'settings', label: 'Settings' },
     ];
     return { store, tabs };
   },
@@ -37,6 +41,8 @@ export default {
       <main class="content">
         <AgentsTab v-show="store.activeTab === 'agents'" />
         <HashingTab v-show="store.activeTab === 'hashing'" />
+        <LinkChangesTab v-show="store.activeTab === 'link'" />
+        <SettingsTab v-show="store.activeTab === 'settings'" />
       </main>
     </div>
   `,

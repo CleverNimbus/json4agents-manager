@@ -42,6 +42,15 @@ export const saveState = (patch) =>
     body: JSON.stringify(patch),
   });
 
+export const getSettings = () => request('/api/settings');
+
+export const saveSettings = (patch) =>
+  request('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+
 export const listFolder = (path) => request(`/api/fs?path=${encodeURIComponent(path ?? '')}`);
 
 /** Create data/agents/<code>.json. */
@@ -62,6 +71,17 @@ export const updateAgent = (previousCode, agent) =>
 
 export const deleteAgent = (code) =>
   request(`/api/agents/${encodeURIComponent(code)}`, { method: 'DELETE' });
+
+/** Uncommitted git changes inside the workspace folder. */
+export const getChanges = () => request('/api/changes');
+
+/** Add files to an agent's result_generated_files. */
+export const linkFiles = (code, paths) =>
+  request(`/api/agents/${encodeURIComponent(code)}/link-files`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths }),
+  });
 
 /**
  * Start a hash run and consume its progress stream.

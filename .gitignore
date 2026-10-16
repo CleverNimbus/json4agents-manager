@@ -2,5 +2,6 @@ node_modules/
 *.tmp
 *.json.*.tmp
 
-# Machine specific UI state (last hashed folder) - not worth versioning.
+# Machine specific local state and settings - not worth versioning.
 data/state.json
+data/settings.json
