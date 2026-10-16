@@ -18,11 +18,13 @@ export default {
   },
   emits: ['close'],
   setup(props, { emit }) {
-    /** Newest first. */
+    /**
+     * Newest first, which is the order the API already sends: histories are
+     * assembled from the hash run files newest run first.
+     */
     const history = computed(() =>
       [...(props.entry.hashes ?? [])]
         .filter((item) => item && typeof item === 'object' && typeof item.hash === 'string')
-        .reverse()
         .map((item, index, all) => ({
           datetime: item.datetime,
           hash: item.hash,

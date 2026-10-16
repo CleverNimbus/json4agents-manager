@@ -34,6 +34,7 @@ export PATH=/home/sefe/local-sources/00_frameworks/node-v24.15.0-linux-x64/bin:$
 npm install     # 94 packages, no build step
 npm start       # http://127.0.0.1:8000
 npm run dev     # same with node --watch
+npm test        # 235 tests, node:test only, no extra dependency
 npm run doctor  # read only integrity checks, exit 1 if anything is an error
 ```
 
@@ -137,6 +138,8 @@ webapp/src/
     SettingsTab.js            workspace folder + git root settings
 webapp/tools/
   doctor.js                   npm run doctor - read only integrity checks, exit 1 on errors
+test/                         npm test - node:test suite; every test gets its own
+                              temp data folder, nothing touches the real data/
 ```
 
 ## 5. Data files
@@ -403,6 +406,7 @@ on screen.
 | `npm run doctor` reuses server modules | a second implementation of the checks could disagree with the code it checks |
 | Shared `stateFile` / `agentsValidation` | two callers, one implementation |
 | Settings separate from state | `state.json` is what the app remembers *about* a session; `settings.json` is what a human configured |
+| Tests use `node:test` | it ships with Node, so the suite adds no dependency to install or audit |
 
 ## 10. Known gaps
 
@@ -415,9 +419,13 @@ on screen.
   uncommitted. Intended, not a bug, but easy to mistake for one.
 - Hash run files accumulate forever. There is no retention policy or compaction;
   a busy workspace that hashes daily will grow a file per run.
-- No automated test suite. Everything is verified by hand with curl, `npm run
-  doctor` plus a real browser; keep that up for new features.
+- The suite covers the server, the pure client helpers and the merge behaviour.
+  The Vue components themselves are still verified by hand in a browser; there is
+  no DOM test.
 - `--root` is a CLI flag only; the workspace git root is not enforced as a jail.
+- The doctor and the test suite both serialise on `data-location.json`, which
+  lives in the repository root. `npm test` therefore runs with
+  `--test-concurrency=1`.
 
 ## 11. Where to add things
 
@@ -430,3 +438,34 @@ on screen.
 | new API route | a `Router` in `webapp/server/`, mounted in `server.js`, wrapper in `src/api.js` |
 | new persisted file | add to `config.files`, read via `store.js`, write atomically |
 | new integrity check | `webapp/tools/doctor.js`; reuse the server module so the check cannot drift, and list it in the README |
+| change behaviour | add a test to the matching `test/*.test.js` first, see *Testing* below |
+
+## 12. Testing
+
+`npm test` runs `node --test` over `test/*.test.js` - no test framework to
+install, and the runner is already there with Node.
+
+**Where the data comes from.** Every test that reads or writes data calls
+`useDataFolder()` from `test/helpers.js`, which creates a temp folder, copies the
+schema in, and points `config.dataDir` at it. Nothing in the suite can reach
+`data/`. The repo-level `data-location.json` is the one shared file a test can
+touch, so it is removed before and after each such test, and the suite asserts it
+was not left behind - which is also why `--test-concurrency=1`.
+
+**How the HTTP tests work.** `server.js` exports `createApp()` and only calls
+`listen()` when it is the program being run, so a test can mount the real app on
+an ephemeral port and talk to it with `fetch`. The loopback Host guard needs a
+`Host` header `fetch` will not send, so that one test uses raw `node:http`.
+
+**How git tests work.** `test/merge.test.js` builds two real clones in temp
+folders, with this project's `.gitignore`, hashes a tree from each side through
+the real store, and runs a real `git merge`.
+
+**The rule for a failing test.** A test states the expected result. If it fails,
+either the expectation was wrong - in which case the expectation is rewritten to
+match the documented behaviour, and the documentation is what is wrong first - or
+the code is wrong, and the code gets fixed. A test is never relaxed to accept a
+behaviour nobody intended. Three real bugs were found this way while the suite was
+written: the root folder hash being rolled up before its children existed,
+`latestHash()` reading a newest-first history from the wrong end, and one
+unreadable run file failing the entire hash store.

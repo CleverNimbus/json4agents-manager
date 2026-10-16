@@ -41,12 +41,19 @@ export const lastOf = (list) => (Array.isArray(list) && list.length > 0 ? list[l
 
 export const countOf = (list) => (Array.isArray(list) ? list.length : 0);
 
-/** Latest SHA-256 of a hashes.json entry: hashes are appended, last one wins. */
+/**
+ * Current SHA-256 of a hash store entry.
+ *
+ * The API returns each path's history newest first (assembled from the run
+ * files, newest run first), so the current hash is the first element. Anything
+ * else here shows a stale hash as current - the exact failure the per-run store
+ * was built to remove.
+ */
 export function latestHash(entry) {
   const hashes = Array.isArray(entry?.hashes) ? entry.hashes : [];
-  const last = hashes[hashes.length - 1];
-  if (typeof last === 'string') return last;
-  return typeof last?.hash === 'string' ? last.hash : '';
+  const first = hashes[0];
+  if (typeof first === 'string') return first;
+  return typeof first?.hash === 'string' ? first.hash : '';
 }
 
 /** "2 items · a, b" style summary for the array fields of an agent. */

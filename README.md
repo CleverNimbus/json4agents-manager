@@ -25,6 +25,42 @@ Options (also available as `PORT` / `JSONM_DATA_DIR` / `HOST`):
 `npm run dev` does the same with `node --watch`, so the server restarts when a
 file in `server/` changes.
 
+## Tests
+
+```bash
+npm test        # 235 tests, no extra dependency: node:test
+```
+
+`test/` holds the suite. It runs the real server on an ephemeral port against a
+throwaway data folder under the OS temp dir - **nothing ever touches `data/`**,
+which is why `test/helpers.js` points the app at a copy and asserts the
+repository is left alone.
+
+| File | Covers |
+| --- | --- |
+| `store.test.js` | reading and writing JSON data files, atomic writes |
+| `validate.test.js` | the schema, `format: date-time`, and that a failed compile is not cached |
+| `agentsStore.test.js` | identity rules, code safety, ordering, rename on a code change |
+| `api.test.js` | every route the browser calls, the NDJSON hash stream, the loopback guard |
+| `hashRunner.test.js` | the published folder hash algorithm, progress, cancelling |
+| `hashesStore.test.js` | delta run files, newest-first histories, the legacy conversion |
+| `merge.test.js` | two clones, two machines, `git merge`, newest-by-time wins |
+| `settings.test.js` | the workspace/git-root pair, `state.json` and `settings.json` |
+| `gitChanges.test.js` | `git status --porcelain -z` parsing and workspace filtering |
+| `config.test.js` | which data folder wins, `~` expansion, the `--root` jail |
+| `doctor.test.js` | every check the doctor makes, and its exit code |
+| `format.test.js` | the shared display helpers |
+
+Three bugs it caught while being written, all fixed:
+
+- the root folder's hash was rolled up **before** its children existed, so every
+  child hash entered as the string `undefined` and the root hash never changed
+  again;
+- `latestHash()` and the history popup still read the history oldest-first, so
+  the grid could show a stale hash as current - the exact failure the per-run
+  store exists to prevent;
+- one unreadable run file took down the whole hash store with a 500.
+
 ## Checks
 
 ```bash
@@ -303,6 +339,9 @@ webapp/src/                   browser app (no build step)
   main.js  api.js  store.js  format.js
   components/  App  AgentsTab  AgentModal  HashingTab  HashDetail
                 LinkChangesTab  FolderPicker  SettingsTab  DataTable
+webapp/tools/
+  doctor.js                   npm run doctor: read only integrity checks
+test/                         npm test: node:test suite, temp data folders only
 ```
 
 ## Dependencies

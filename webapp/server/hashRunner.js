@@ -192,7 +192,14 @@ export async function hashFolder(root, { includeHidden = true, followSymlinks = 
   });
 
   // Bottom up rollup: deepest folders first.
-  const ordered = [...folders.keys()].sort((a, b) => b.split('/').length - a.split('/').length);
+  //
+  // Depth must count path segments, and the root has none: ''.split('/') is
+  // [''], which would tie the root with its direct children. With a stable sort
+  // the root would then be rolled up before its children exist and every child
+  // hash would come out as undefined - and since the root hash would depend
+  // only on the names, it would never change again.
+  const depthOf = (rel) => (rel === '' ? 0 : rel.split('/').length);
+  const ordered = [...folders.keys()].sort((a, b) => depthOf(b) - depthOf(a));
   const folderHashes = new Map();
   const folderList = [];
 

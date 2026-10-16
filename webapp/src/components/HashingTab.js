@@ -100,15 +100,17 @@ export default {
     ];
 
     /**
-     * Turn a hashes.json entry into a grid row. `changed` is true when the
+     * Turn a hash store entry into a grid row. `changed` is true when the
      * newest hash differs from the one recorded before it - the server never
      * stores the same hash twice, so this marks exactly the rows that moved.
+     * `hashes` arrives newest first, so current is [0] and the one before it
+     * is [1]; indexing from the end would compare the two oldest hashes.
      */
     const flatten = (entries) =>
       entries.map((entry) => {
         const hashes = Array.isArray(entry.hashes) ? entry.hashes : [];
         const latest = latestHash(entry);
-        const previous = hashes.length > 1 ? hashes[hashes.length - 2]?.hash : undefined;
+        const previous = hashes.length > 1 ? hashes[1]?.hash : undefined;
         return {
           path: entry.path,
           hash: latest,

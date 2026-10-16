@@ -17,7 +17,7 @@ import path from 'node:path';
 import { config, files } from '../server/config.js';
 import { scanAgents } from '../server/agentsStore.js';
 import { validateAgentRecord } from '../server/validate.js';
-import { getIndex, listRunFiles, readAllRuns } from '../server/hashesStore.js';
+import { getIndex, listRunFiles, readAllRuns, readBrokenRunFiles } from '../server/hashesStore.js';
 import { rollupHash } from '../server/hashRunner.js';
 import { readState } from '../server/stateStore.js';
 import { readSettings as readSettingsFile } from '../server/settingsStore.js';
@@ -91,6 +91,13 @@ async function checkHashes() {
 
   const runFiles = await listRunFiles();
   const runs = await readAllRuns();
+
+  // Run files the store skipped: the app carries on without them, but silently
+  // losing a record is exactly the kind of thing this command is for.
+  for (const broken of await readBrokenRunFiles()) {
+    add('error', 'hashes', `Run file ${broken.file} cannot be read`, broken.message);
+  }
+
   const seenIds = new Map();
 
   for (const run of runs) {

@@ -51,14 +51,17 @@ export async function resolveBrowsable(input, { mustBeDirectory = true } = {}) {
   return abs;
 }
 
-/** Parent directory, or null at the filesystem root / jail boundary. */
+/**
+ * Parent directory, or null at the filesystem root / jail boundary.
+ *
+ * The jail itself is a valid parent - browsing into `<root>/sub` must still
+ * offer `<root>` - so only a parent strictly above the jail is refused.
+ */
 export function parentOf(abs) {
   const parent = path.dirname(abs);
   if (parent === abs) return null;
-  if (config.browseRoot) {
-    if (parent === config.browseRoot) return null;
-    if (!parent.startsWith(config.browseRoot + path.sep)) return null;
-  }
+  const root = config.browseRoot;
+  if (root && parent !== root && !parent.startsWith(root + path.sep)) return null;
   return parent;
 }
 

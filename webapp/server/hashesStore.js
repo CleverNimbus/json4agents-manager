@@ -82,7 +82,16 @@ async function runSignature() {
 }
 
 async function readRunFile(file) {
-  const run = await readJsonFile(file, null);
+  // One damaged run file must not take the whole store down: a hash run is a
+  // record, and losing one entry in it is recoverable, whereas a 500 on
+  // GET /api/hashes would make the whole tab unusable. `readBrokenRunFiles`
+  // reports what was skipped so the problem is not invisible.
+  let run;
+  try {
+    run = await readJsonFile(file, null);
+  } catch {
+    return null;
+  }
   if (!run || typeof run !== 'object' || typeof run.finishedAt !== 'string') return null;
   return {
     id: path.basename(file, '.json'),
@@ -103,6 +112,27 @@ export async function readAllRuns() {
   const files_ = await listRunFiles();
   const runs = (await Promise.all(files_.map(readRunFile))).filter(Boolean);
   return sortRuns(runs);
+}
+
+/**
+ * Run files that could not be read, with the reason. Used by `npm run doctor`;
+ * the app itself just carries on without them.
+ *
+ * @returns {Promise<Array<{ file: string, message: string }>>}
+ */
+export async function readBrokenRunFiles() {
+  const broken = [];
+  for (const file of await listRunFiles()) {
+    try {
+      const run = await readJsonFile(file, null);
+      if (!run || typeof run !== 'object' || typeof run.finishedAt !== 'string') {
+        broken.push({ file: path.basename(file), message: 'Not a hash run: no finishedAt' });
+      }
+    } catch (err) {
+      broken.push({ file: path.basename(file), message: err.message });
+    }
+  }
+  return broken;
 }
 
 // ------------------------------------------------------------------- index
