@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agents",
+  "type": "object",
+  "properties": {
+    "agents": {
+      "type": "array",
+      "description": "Collection of agents",
+      "items": { "$ref": "#/$defs/agent" }
+    }
+  },
+  "required": ["agents"],
+  "additionalProperties": false,
+  "$defs": {
+    "agent": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Unique agent code"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "number"
+        },
+        "parent": {
+          "type": "string",
+          "description": "Code of parent agent"
+        },
+        "source_dependant_files": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "result_generated_files": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "executions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "required": ["code", "name", "phase"],
+      "additionalProperties": false
+    }
+  }
+}
