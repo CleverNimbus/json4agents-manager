@@ -1,0 +1,6 @@
+node_modules/
+*.tmp
+*.json.*.tmp
+
+# Machine specific UI state (last hashed folder) - not worth versioning.
+data/state.json

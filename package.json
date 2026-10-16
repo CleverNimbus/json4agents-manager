@@ -1,0 +1,20 @@
+{
+  "name": "json-manager",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local web app to display and edit agents.json and to hash folders into hashes.json",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node webapp/server.js",
+    "dev": "node --watch webapp/server.js"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "express": "^5.3.0",
+    "vue": "^3.5.44"
+  }
+}
