@@ -14,7 +14,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { countOf, formatBytes, formatDuration, latestHash, shortHash, summariseList } from '../webapp/src/format.js';
+import { countOf, formatBytes, formatDuration, formatTime, lastOf, latestHash, shortHash, summariseList } from '../webapp/src/format.js';
 
 describe('formatBytes', () => {
   it('uses bytes below 1 KB', () => {
@@ -116,5 +116,53 @@ describe('list helpers', () => {
     assert.equal(summariseList(['a']), '1 · a');
     assert.equal(summariseList(['a', 'b']), '2 · a, b');
     assert.equal(summariseList(['a', 'b', 'c']), '3 items · a, b …');
+  });
+});
+
+describe('formatTime', () => {
+  it('returns an empty string for falsy input', () => {
+    assert.equal(formatTime(''), '');
+    assert.equal(formatTime(undefined), '');
+    assert.equal(formatTime(null), '');
+  });
+
+  it('returns the raw string when it cannot be parsed as a date', () => {
+    assert.equal(formatTime('not a date'), 'not a date');
+    assert.equal(formatTime('---'), '---');
+  });
+
+  it('formats a valid ISO string into locale date-time', () => {
+    const formatted = formatTime('2026-10-16T19:04:31.469Z');
+    assert.ok(typeof formatted === 'string' && formatted.length > 0);
+    assert.ok(!formatted.includes('Invalid'), 'a valid ISO string must not produce "Invalid Date"');
+    // Locale output varies, but must contain year, month, day separators.
+    assert.match(formatted, /2026/);
+    assert.match(formatted, /10/);
+    assert.match(formatted, /16/);
+  });
+
+  it('pads single-digit months and days to two digits', () => {
+    const formatted = formatTime('2026-01-05T08:09:10.000Z');
+    // toLocaleString with month: '2-digit', day: '2-digit' → "01" and "05"
+    assert.match(formatted, /01/);
+    assert.match(formatted, /05/);
+  });
+});
+
+describe('lastOf', () => {
+  it('returns the last element of an array', () => {
+    assert.equal(lastOf([1, 2, 3]), 3);
+    assert.equal(lastOf(['a', 'b']), 'b');
+  });
+
+  it('returns empty string for an empty array', () => {
+    assert.equal(lastOf([]), '');
+  });
+
+  it('returns empty string for non-array input', () => {
+    assert.equal(lastOf(undefined), '');
+    assert.equal(lastOf(null), '');
+    assert.equal(lastOf('string'), '');
+    assert.equal(lastOf(42), '');
   });
 });

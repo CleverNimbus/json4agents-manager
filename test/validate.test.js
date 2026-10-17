@@ -88,6 +88,20 @@ describe('validateAgentRecord', () => {
       assert.equal((await validateAgentRecord(value)).valid, false);
     }
   });
+
+  it('reports every invalid execution when several are present', async () => {
+    const record = agent('AG-001', {
+      executions: ['2026-10-16T19:04:31.469Z', 'not-a-date', '2026-11-01T00:00:00.000Z', 'also-bad'],
+    });
+    const { valid, errors } = await validateAgentRecord(record);
+    assert.equal(valid, false);
+    // Each invalid execution is reported at its index, not merged.
+    assert.ok(errors.some((e) => e.path === '/executions/1'), 'index 1 is invalid');
+    assert.ok(errors.some((e) => e.path === '/executions/3'), 'index 3 is invalid');
+    // Valid executions must NOT be flagged.
+    assert.ok(!errors.some((e) => e.path === '/executions/0'));
+    assert.ok(!errors.some((e) => e.path === '/executions/2'));
+  });
 });
 
 describe('validateAgentCollection', () => {
@@ -107,6 +121,7 @@ describe('validateAgentCollection', () => {
     assert.equal(collection({}), false, 'a document without "agents" is not a collection');
     assert.equal(collection({ agents: [] }), true);
   });
+
 });
 
 describe('schema cache', () => {
