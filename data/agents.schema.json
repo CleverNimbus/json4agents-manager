@@ -42,13 +42,6 @@
         "result_generated_files": {
           "type": "array",
           "items": { "type": "string" }
-        },
-        "executions": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "date-time"
-          }
         }
       },
       "required": ["code", "name", "phase"],

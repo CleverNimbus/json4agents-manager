@@ -11,7 +11,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import DataTable from './DataTable.js';
 import { formatBytes } from '../format.js';
 import * as api from '../api.js';
-import { loadAgents, setBanner, store } from '../store.js';
+import { loadAgents, publishExecution, setBanner, store } from '../store.js';
 
 const SELECT_COLUMN = { key: 'select', label: '', sortable: false, text: () => '', className: 'col-select' };
 
@@ -29,6 +29,7 @@ export default {
   setup() {
     const loading = ref(false);
     const linking = ref(false);
+    const recording = ref(false);
     const error = ref('');
     const info = ref(null);
     const rows = ref([]);
@@ -109,6 +110,39 @@ export default {
       }
     }
 
+    /**
+     * Publish an execution receipt for the selected files. The server hashes
+     * the git index (never the dirty worktree) and refuses when a path is
+     * untracked, unstaged or already published for the same inputs. The app
+     * never runs `git commit`: the receipt, the selected outputs and any
+     * staged inputs ride the next commit together.
+     */
+    async function record() {
+      const paths = selectedPaths.value;
+      if (selectedAgent.value === '' || paths.length === 0) return;
+      recording.value = true;
+      error.value = '';
+      try {
+        const result = await publishExecution(selectedAgent.value, paths);
+        const staged = Array.isArray(result?.staged) ? result.staged : [];
+        const receiptFile = `data/executions/${result.receipt.id}.json`;
+        const stagedNote = staged.length === 0
+          ? 'All recorded paths are already committed - commit the receipt file.'
+          : `Commit ${receiptFile} together with the ${staged.length} staged path(s): ${staged.join(', ')}.`;
+        setBanner('info', `Execution recorded for ${selectedAgent.value}. ${stagedNote}`);
+        await reload();
+      } catch (err) {
+        const conflicts = Array.isArray(err.body?.errors) ? err.body.errors : [];
+        const detail = conflicts.length > 0
+          ? ` ${conflicts.map((entry) => `${entry.path}: ${entry.message}`).join(' ')}`
+          : '';
+        error.value = err.message;
+        setBanner('error', `Could not record the execution: ${err.message}.${detail}`);
+      } finally {
+        recording.value = false;
+      }
+    }
+
     return {
       allSelected,
       agentOptions,
@@ -119,6 +153,8 @@ export default {
       link,
       linking,
       loading,
+      record,
+      recording,
       reload,
       rows,
       selectAll,
@@ -192,6 +228,12 @@ export default {
               @click="link"
               :disabled="linking || selectedAgent === '' || selected.size === 0"
             >Link changes to agent</button>
+            <button
+              type="button"
+              class="primary"
+              @click="record"
+              :disabled="recording || linking || selectedAgent === '' || selected.size === 0"
+            >Record execution</button>
           </div>
           <p class="link-note">
             Selected files are appended to <span class="mono">result_generated_files</span> of the chosen
@@ -199,6 +241,13 @@ export default {
             <span v-if="selectedAgent">
               Agent file: <span class="mono">data/agents/{{ selectedAgent }}.json</span>
             </span>
+          </p>
+          <p class="link-note">
+            <strong>Record execution</strong> writes an immutable receipt to
+            <span class="mono">data/executions/</span> with the git blob ids and hashes of the selected
+            outputs and of the agent's <span class="mono">source_dependant_files</span>. Receipts are
+            committed to git - an unpushed receipt does not exist for the team. Republishing the same
+            outputs for unchanged inputs is refused.
           </p>
         </div>
       </template>

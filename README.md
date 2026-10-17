@@ -5,7 +5,8 @@
 
 A local web app for keeping track of agents and the files they touch: browse and
 edit agent records, hash a folder to see exactly what changed since the last run,
-and link uncommitted git files to the agent that produced them.
+link uncommitted git files to the agent that produced them, and record an
+execution so a teammate never pays for the same generation twice.
 
 Built for anyone running multiple agents over the same workspace: the records
 live as plain JSON in git, the hash store survives a two-user merge, and nothing
@@ -52,7 +53,14 @@ unchanged tree records almost nothing.
 
 **Link Changes to Agent** - the uncommitted files in your workspace, from
 `git status`, with checkboxes and an agent picker that writes the selection into
-that agent's `result_generated_files`.
+that agent's `result_generated_files`. The same selection can be recorded as an
+execution.
+
+**Executions** - a receipt per published run: the git blob and SHA-256 of the
+selected outputs and of the agent's `source_dependant_files`, in one immutable
+file under `data/executions/` that you commit with the outputs. A teammate who
+pulls it sees the work is done; a hand-edited output or an unpushed run is not a
+receipt.
 
 **Settings** - where the workspace is, where its git root is, and where the data
 folder lives. Saving reloads everything that depends on it.
@@ -71,6 +79,14 @@ hash changed, so a run over an unchanged tree is tiny and two people hashing at
 once produce two files that git merges without a conflict. "Which hash is
 current" is computed from the run files, never stored - so a merge cannot make
 the grid show a stale hash as current.
+
+**One immutable file per execution receipt.** Recording a run writes a new file
+under `data/executions/` holding the git blob and SHA-256 of the outputs and of
+the agent's inputs; it is committed with the outputs, so two people recording at
+once add two files that merge cleanly instead of fighting over one document. The
+content is read from the git index, never a dirty working tree, and republishing
+the same outputs for unchanged inputs is refused - a hand-edited output is not a
+new execution.
 
 **Plain files, no lock-in.** Everything the app persists is JSON on disk
 ([data layout](#data-layout)); hashing uses `node:crypto`, and the browser UI
@@ -103,8 +119,10 @@ npm test
 `node:test`, ships with Node - no extra dependency. The suite runs the real
 server on an ephemeral port against a throwaway data folder under the OS temp
 dir; **nothing ever touches `data/`**. It also replays a real two-user
-`git merge`. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) section 12 for
-how the suite is wired.
+`git merge` - for the hash store and for execution receipts - inside real
+repositories under the temp dir. See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) section 12 for how the suite is
+wired.
 
 ## `npm run doctor`
 
@@ -121,6 +139,7 @@ are not crashes but states that are still valid JSON and still wrong:
 | --- | --- |
 | agents | file name matches the record's code, no duplicate or case-colliding codes, records parse and match the schema, set valued fields free of duplicates and sorted, no absolute or `..` paths, `parent` points at an agent that exists |
 | hashes | run files parse, no two runs claiming one id, every path relative and inside the root, no repeated or out-of-order hashes, every folder hash equal to the rollup of its children, the index lists every run |
+| executions | receipt files parse, no unknown agent code, every path relative and inside the git root, no output published twice under unchanged inputs, no receipt that no longer matches the committed files |
 | data | `agents.schema.json` present, no leftover legacy `hashes.json`, incomplete workspace settings |
 
 Exit code is `1` when anything is an error. A folder hash is recomputed with the
@@ -138,6 +157,9 @@ data/
   hashes/
     runs/*.json         one immutable file per hash run   [git ignored]
     index.json          derived cache (git ignored, rebuildable)
+  executions/
+    README.md           what a receipt is, and the commit discipline
+    <id>.json           one immutable receipt per published run (committed)
   state.json            UI state, e.g. the last folder used in the hashing tab
   settings.json         settings chosen in the Settings tab
 ```
@@ -150,6 +172,11 @@ that was hashed and the path of every file in it, which is local information by
 nature - so this repository ships an empty store and your first run fills it. A
 team that wants one shared store in git can opt in; see
 [`data/hashes/README.md`](data/hashes/README.md).
+
+**Execution receipts are tracked.** Unlike a hash run, a receipt holds only
+git-relative paths and hashes - no absolute path, no machine name - so it is
+meant to be committed and pulled by the rest of the team. See
+[`data/executions/README.md`](data/executions/README.md).
 
 `state.json`, `settings.json` and the data-folder location are machine specific
 too, so they are git ignored, and a missing, empty or malformed one falls back to
@@ -182,7 +209,14 @@ the defaults instead of breaking the app.
 | `GET /api/schema` | the JSON Schema, used to build the edit form |
 | `GET /api/changes` | uncommitted git files inside the workspace folder |
 | `POST /api/agents/:code/link-files` | add paths to that agent's `result_generated_files` |
+| `GET /api/agent-dependencies` | agents plus the edges where one agent's output feeds another's input |
+| `GET /api/execution-plan` | the saved run order for the paths that changed |
+| `POST /api/execution-plan/generate` | rebuild that plan from the current hash view |
+| `PATCH /api/execution-plan` | toggle a step's `done` flag |
 | `GET /api/hashes` | hash history assembled from the run files |
+| `POST /api/hashes/rebuild` | force a rebuild of the derived index |
+| `GET /api/executions` | execution receipts, each with its status against git |
+| `POST /api/executions` | record an execution from `{agent, paths}` (`409` if already published for the same inputs) |
 | `GET /api/state` | `state.json` (e.g. the last hashed folder) |
 | `PUT /api/state` | merge a patch into `state.json` |
 | `GET /api/settings` | `settings.json` (workspace folder and git root) |
@@ -206,8 +240,15 @@ webapp/server/
   agentsApi.js                CRUD for the agent files, GET /api/schema,
                               POST /api/agents/:code/link-files
   agentsValidation.js         one agent record + its collection, shared by both
+  agentDependencies.js        which agents' outputs feed other agents' inputs
+  dependenciesApi.js          GET /api/agent-dependencies
   gitChanges.js               git status of the workspace folder, relative to the git root
   changesApi.js               GET /api/changes
+  executionPlan.js            run order derived from the changed paths
+  executionPlanStore.js       data/execution-plan.json, tolerant of a broken file
+  executionPlanApi.js         GET/POST/PATCH /api/execution-plan
+  executionsStore.js          execution receipts: git blob + SHA-256 of inputs and outputs
+  executionsApi.js            GET/POST /api/executions
   stateFile.js                shared read/write/atomic-write helper for the two small files
   stateStore.js               data/state.json, tolerant of a broken file
   stateApi.js                 GET/PUT /api/state
@@ -223,8 +264,9 @@ webapp/index.html             import map: "vue" -> /vendor/vue.esm-browser.prod.
 webapp/styles.css
 webapp/src/                   browser app (no build step)
   main.js  api.js  store.js  format.js
-  components/  App  AgentsTab  AgentModal  HashingTab  HashDetail
-                LinkChangesTab  FolderPicker  SettingsTab  DataTable
+  components/  App  AgentsTab  AgentModal  AgentDependenciesTab
+                HashingTab  HashDetail  ExecutionPlanPanel  LinkChangesTab
+                ExecutionsTab  FolderPicker  SettingsTab  DataTable
 webapp/tools/
   doctor.js                   npm run doctor: read only integrity checks
 test/                         npm test: node:test suite, temp data folders only
@@ -244,6 +286,7 @@ Hashing uses `node:crypto`, so there is no hashing dependency. Tests use
 | --- | --- |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | how it is built and why - the file to read first |
 | [`data/hashes/README.md`](data/hashes/README.md) | what a hash run file is, and how to share a store through git |
+| [`data/executions/README.md`](data/executions/README.md) | what an execution receipt is, and the commit discipline around it |
 
 ## License
 

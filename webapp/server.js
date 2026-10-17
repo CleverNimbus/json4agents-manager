@@ -24,6 +24,7 @@ import { changesRouter } from './server/changesApi.js';
 import { dataFolderRouter } from './server/dataFolderApi.js';
 import { dependenciesRouter } from './server/dependenciesApi.js';
 import { executionPlanRouter } from './server/executionPlanApi.js';
+import { executionsRouter } from './server/executionsApi.js';
 import { fsRouter } from './server/fsApi.js';
 import { hashRouter } from './server/hashApi.js';
 import { migrateLegacyHashes } from './server/hashesStore.js';
@@ -90,6 +91,7 @@ export function createApp({ host = config.host } = {}) {
   app.use(dataFolderRouter);
   app.use(dependenciesRouter);
   app.use(executionPlanRouter);
+  app.use(executionsRouter);
   app.use(fsRouter);
   app.use(hashRouter);
   app.use(stateRouter);

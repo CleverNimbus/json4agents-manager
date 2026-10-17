@@ -22,6 +22,13 @@ import { config, files } from '../server/config.js';
 import { scanAgents } from '../server/agentsStore.js';
 import { validateAgentRecord } from '../server/validate.js';
 import { getIndex, listRunFiles, readAllRuns, readBrokenRunFiles } from '../server/hashesStore.js';
+import {
+  listReceiptFiles,
+  readAllReceipts,
+  readBrokenReceiptFiles,
+  receiptsView,
+  sameEntrySet,
+} from '../server/executionsStore.js';
 import { rollupHash } from '../server/hashRunner.js';
 import { readState } from '../server/stateStore.js';
 import { readSettings as readSettingsFile } from '../server/settingsStore.js';
@@ -49,7 +56,7 @@ async function checkAgents() {
       add('error', 'agents', `${code} does not match the schema`, errors.map((e) => `${e.path} ${e.message}`).join('; '));
     }
 
-    for (const field of ['result_generated_files', 'executions', 'source_dependant_files']) {
+    for (const field of ['result_generated_files', 'source_dependant_files']) {
       const value = agent[field];
       if (!Array.isArray(value)) continue;
       if (new Set(value).size !== value.length) {
@@ -82,7 +89,7 @@ async function checkAgents() {
     }
   }
 
-  return records.length;
+  return { count: records.length, codes: new Set(codes.keys()) };
 }
 
 // -------------------------------------------------------------------- hashes
@@ -198,6 +205,98 @@ const push = (list, entry, run) => {
   list.set(entry.path, history);
 };
 
+// -------------------------------------------------------------- executions
+
+async function checkExecutions(agentCodes) {
+  if (!(await fileExists(files.executionsDir))) {
+    add('info', 'executions', 'No execution receipts recorded yet');
+    return 0;
+  }
+
+  const receiptFiles = await listReceiptFiles();
+  const receipts = await readAllReceipts();
+
+  for (const broken of await readBrokenReceiptFiles()) {
+    add('error', 'executions', `Receipt ${broken.file} cannot be read`, broken.message);
+  }
+
+  const seenIds = new Map();
+
+  for (const receipt of receipts) {
+    const previous = seenIds.get(receipt.id);
+    if (previous) add('error', 'executions', `Two receipt files claim the id ${receipt.id}`, path.basename(previous));
+    else seenIds.set(receipt.id, receipt.file ?? receipt.id);
+
+    if (!receipt.agent) add('error', 'executions', `Receipt ${receipt.id} has no agent code`);
+    else if (!agentCodes.has(receipt.agent)) {
+      add('warning', 'executions', `Receipt ${receipt.id} names agent ${receipt.agent}, which does not exist`);
+    }
+    if (!receipt.recordedAt) add('error', 'executions', `Receipt ${receipt.id} has no timestamp`);
+    if (receipt.outputs.length === 0) add('warning', 'executions', `Receipt ${receipt.id} records no generated files`);
+
+    for (const entry of [...receipt.inputs, ...receipt.outputs]) {
+      if (entry.blob === '' || entry.sha256 === '') {
+        add('error', 'executions', `Receipt ${receipt.id} holds an entry without a blob or hash`, entry.path);
+        continue;
+      }
+      if (path.isAbsolute(entry.path)) add('error', 'executions', `Receipt ${receipt.id} holds an absolute path`, entry.path);
+      else if (entry.path.split('/').includes('..')) add('error', 'executions', `Receipt ${receipt.id} escapes the git root`, entry.path);
+    }
+  }
+
+  // The same output path must not be published twice for the same inputs.
+  // Identical content is only noise; different content under unchanged inputs
+  // is the hand-edit this store refuses to bless.
+  const published = [];
+  let conflicts = 0;
+  for (const receipt of receipts) {
+    for (const output of receipt.outputs) {
+      const twin = published.find(
+        (p) => p.agent === receipt.agent && p.path === output.path && sameEntrySet(p.inputs, receipt.inputs),
+      );
+      if (!twin) {
+        published.push({ agent: receipt.agent, path: output.path, sha256: output.sha256, inputs: receipt.inputs, id: receipt.id });
+        continue;
+      }
+      conflicts += 1;
+      if (conflicts <= MAX_LISTED) {
+        const identical = twin.sha256 === output.sha256;
+        add(
+          identical ? 'warning' : 'error',
+          'executions',
+          identical
+            ? `${output.path} is recorded twice for the same inputs (${twin.id}, ${receipt.id})`
+            : `${output.path} changed under unchanged inputs (${twin.id}, ${receipt.id})`,
+          identical ? 'the later receipt adds nothing' : 'a hand-edited output must not be published as a new run',
+        );
+      }
+    }
+  }
+  if (conflicts > MAX_LISTED) add('error', 'executions', `… and ${conflicts - MAX_LISTED} more repeated outputs`);
+
+  // Statuses need git; a data folder without a configured workspace is fine.
+  try {
+    const view = await receiptsView();
+    if (!view.configured) {
+      add('info', 'executions', 'Receipt statuses were not checked against git', 'no workspace folder and git root configured');
+    } else {
+      let diverged = 0;
+      for (const receipt of view.receipts) {
+        if (receipt.status !== 'diverged') continue;
+        diverged += 1;
+        if (diverged <= MAX_LISTED) {
+          add('warning', 'executions', `Receipt ${receipt.id} no longer matches the committed files`, 'an output changed without the inputs changing');
+        }
+      }
+      if (diverged > MAX_LISTED) add('warning', 'executions', `… and ${diverged - MAX_LISTED} more diverged receipts`);
+    }
+  } catch (err) {
+    add('info', 'executions', 'Receipt statuses were not checked against git', err.message);
+  }
+
+  return receiptFiles.length;
+}
+
 // -------------------------------------------------------------- data folder
 
 async function checkDataFolder() {
@@ -225,6 +324,7 @@ async function main() {
   const asJson = process.argv.includes('--json');
   const agents = await checkAgents();
   const runs = await checkHashes();
+  const receipts = await checkExecutions(agents.codes);
   const meta = await checkDataFolder();
 
   const errors = findings.filter((f) => f.level === 'error');
@@ -232,12 +332,13 @@ async function main() {
   const infos = findings.filter((f) => f.level === 'info');
 
   if (asJson) {
-    console.log(JSON.stringify({ dataDir: config.dataDir, agents, runs, findings }, null, 2));
+    console.log(JSON.stringify({ dataDir: config.dataDir, agents: agents.count, receipts, runs, findings }, null, 2));
     return errors.length === 0 ? 0 : 1;
   }
 
   console.log(`data folder : ${config.dataDir}`);
-  console.log(`agents      : ${agents}`);
+  console.log(`agents      : ${agents.count}`);
+  console.log(`receipts    : ${receipts}`);
   console.log(`hash runs   : ${runs}`);
   console.log(`last hashed : ${meta.lastFolder || '(none)'}`);
   console.log('');
