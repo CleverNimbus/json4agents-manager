@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2026 CleverNimbus
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { store } from '../store.js';
 

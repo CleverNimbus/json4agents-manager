@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2026 CleverNimbus
+ * SPDX-License-Identifier: Apache-2.0
+ */
 /**
  * Rules for the workspace settings, enforced on the server before anything is
  * written. The browser mirrors them for instant feedback, but this is the copy

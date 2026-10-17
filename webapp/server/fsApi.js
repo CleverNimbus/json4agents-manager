@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2026 CleverNimbus
+ * SPDX-License-Identifier: Apache-2.0
+ */
 /**
  * Folder explorer backend: lists the contents of one directory so the browser
  * can walk the local filesystem without any native file dialog.

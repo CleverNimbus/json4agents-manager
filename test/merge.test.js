@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2026 CleverNimbus
+ * SPDX-License-Identifier: Apache-2.0
+ */
 /**
  * Why the hash store is shaped the way it is: two people work on the same store
  * through git, and neither one's history may be lost or silently reordered.

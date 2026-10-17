@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2026 CleverNimbus
+ * SPDX-License-Identifier: Apache-2.0
+ */
 /**
  * Switching the data folder, and the doctor that checks it.
  *

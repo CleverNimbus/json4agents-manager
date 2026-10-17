@@ -2,6 +2,7 @@
   "name": "json-manager",
   "version": "1.0.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "description": "Local web app to view and edit agent records and to hash folders into per-run files",
   "engines": {

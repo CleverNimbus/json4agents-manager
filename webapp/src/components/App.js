@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2026 CleverNimbus
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import AgentsTab from './AgentsTab.js';
 import HashingTab from './HashingTab.js';
 import LinkChangesTab from './LinkChangesTab.js';

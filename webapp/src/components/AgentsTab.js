@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2026 CleverNimbus
+ * SPDX-License-Identifier: Apache-2.0
+ */
 import { computed, reactive, ref } from 'vue';
 import AgentModal from './AgentModal.js';
 import DataTable from './DataTable.js';
