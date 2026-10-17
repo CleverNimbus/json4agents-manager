@@ -1,13 +1,22 @@
 # json4agents-manager
 
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](https://nodejs.org)
+
 A local web app for keeping track of agents and the files they touch: browse and
 edit agent records, hash a folder to see exactly what changed since the last run,
 and link uncommitted git files to the agent that produced them.
 
-Everything stays on your machine. The Node server reads and writes plain JSON
-files and hashes with `node:crypto`; the browser is only the UI, so it needs no
-file system permissions of its own and there is no account, no sync and no
-telemetry.
+Built for anyone running multiple agents over the same workspace: the records
+live as plain JSON in git, the hash store survives a two-user merge, and nothing
+leaves your machine.
+
+<!--
+Add a screenshot or GIF here, e.g.:
+
+  ![screenshot](docs/screenshots/app.png)
+
+-->
 
 ```
 npm install
@@ -16,48 +25,60 @@ npm start        # http://127.0.0.1:8000
 
 Node 22 or newer. No build step, no bundler, four dependencies.
 
----
+## Contents
 
-## What it does
+- [Features](#features)
+- [How it works](#how-it-works)
+- [Options](#options)
+- [Tests](#tests)
+- [`npm run doctor`](#npm-run-doctor)
+- [Data layout](#data-layout)
+- [HTTP API](#http-api)
+- [Project layout](#project-layout)
+- [Dependencies](#dependencies)
+- [Documentation](#documentation)
+- [License](#license)
 
-**Agents** — one JSON file per record under `data/agents/`, ordered by code. Add,
-edit and delete from a schema-driven popup; editing a code renames the file. A
-file whose content disagrees with its name is reported rather than loaded,
-because it cannot be addressed without creating a second copy of the record.
+## Features
 
-**Hashing** — point it at a folder and it writes SHA-256 for every file and a
-rolled-up hash for every folder, with a live progress line. Yellow dot on a row
-whose content changed; click a row for its full history, newest first. Re-hashing
-an unchanged tree records almost nothing.
+**Agents** - one JSON file per record under `data/agents/`, ordered by code. Add,
+edit and delete from a schema-generated popup; changing a code renames the file.
+A file whose content disagrees with its name is reported rather than loaded.
 
-**Link Changes to Agent** — the uncommitted files in your workspace, listed from
+**Hashing** - point it at a folder and it writes SHA-256 for every file and a
+rolled-up hash for every folder, with live progress and cancel. Yellow dot marks
+rows whose content changed; click one for its full history. Re-hashing an
+unchanged tree records almost nothing.
+
+**Link Changes to Agent** - the uncommitted files in your workspace, from
 `git status`, with checkboxes and an agent picker that writes the selection into
 that agent's `result_generated_files`.
 
-**Settings** — where the workspace is, where its git root is, and where the data
+**Settings** - where the workspace is, where its git root is, and where the data
 folder lives. Saving reloads everything that depends on it.
 
-## Why the interesting parts are interesting
+**`npm run doctor`** - read-only integrity checks over a data folder, exit code
+`1` on error, so it can gate a commit.
+
+## How it works
 
 **One file per record.** Two agents can never overwrite each other, and a single
 record diffs, reviews and merges on its own.
 
-**One immutable file per hash run.** A single shared `hashes.json` is rewritten
-in full by every run, so two people who hash anything at all collide on the same
-sorted document - and a merge can reorder a history so the grid shows a *stale
-hash as current* with no error anywhere. Run files are separate, so git merges
-them without looking inside, and "which hash is current" is computed from the run
-files rather than stored.
+**One immutable file per hash run.** A run writes a new file under
+`data/hashes/runs/` and never edits an old one; it records only the paths whose
+hash changed, so a run over an unchanged tree is tiny and two people hashing at
+once produce two files that git merges without a conflict. "Which hash is
+current" is computed from the run files, never stored - so a merge cannot make
+the grid show a stale hash as current.
 
-**`npm run doctor`.** The store is plain files in git, so the failures worth
-catching are not crashes but states that are still valid JSON and still wrong: a
-folder hash that no longer matches its children, an agent whose code disagrees
-with its file name, a history that repeats itself. Read only, exits non-zero, so
-it can gate a commit.
+**Plain files, no lock-in.** Everything the app persists is JSON on disk
+([data layout](#data-layout)); hashing uses `node:crypto`, and the browser UI
+needs no file system permissions of its own. No account, no sync, no telemetry.
 
-**235 tests, no test framework.** `node:test` ships with Node. The suite runs the
-real server on an ephemeral port against a throwaway data folder, and replays a
-real two-user `git merge`.
+**A shared schema.** Every write is validated against `data/agents.schema.json`
+(JSON Schema draft 2020-12), which also generates the edit form - fields, types
+and required markers follow the schema, not hard-coded UI.
 
 ## Options
 
@@ -76,40 +97,16 @@ file in `server/` changes.
 ## Tests
 
 ```bash
-npm test        # 235 tests, no extra dependency: node:test
+npm test
 ```
 
-`test/` holds the suite. It runs the real server on an ephemeral port against a
-throwaway data folder under the OS temp dir - **nothing ever touches `data/`**,
-which is why `test/helpers.js` points the app at a copy and asserts the
-repository is left alone.
+`node:test`, ships with Node - no extra dependency. The suite runs the real
+server on an ephemeral port against a throwaway data folder under the OS temp
+dir; **nothing ever touches `data/`**. It also replays a real two-user
+`git merge`. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) section 12 for
+how the suite is wired.
 
-| File | Covers |
-| --- | --- |
-| `store.test.js` | reading and writing JSON data files, atomic writes |
-| `validate.test.js` | the schema, `format: date-time`, and that a failed compile is not cached |
-| `agentsStore.test.js` | identity rules, code safety, ordering, rename on a code change |
-| `api.test.js` | every route the browser calls, the NDJSON hash stream, the loopback guard |
-| `hashRunner.test.js` | the published folder hash algorithm, progress, cancelling |
-| `hashesStore.test.js` | delta run files, newest-first histories, the legacy conversion |
-| `merge.test.js` | two clones, two machines, `git merge`, newest-by-time wins |
-| `settings.test.js` | the workspace/git-root pair, `state.json` and `settings.json` |
-| `gitChanges.test.js` | `git status --porcelain -z` parsing and workspace filtering |
-| `config.test.js` | which data folder wins, `~` expansion, the `--root` jail |
-| `doctor.test.js` | every check the doctor makes, and its exit code |
-| `format.test.js` | the shared display helpers |
-
-Three bugs it caught while being written, all fixed:
-
-- the root folder's hash was rolled up **before** its children existed, so every
-  child hash entered as the string `undefined` and the root hash never changed
-  again;
-- `latestHash()` and the history popup still read the history oldest-first, so
-  the grid could show a stale hash as current - the exact failure the per-run
-  store exists to prevent;
-- one unreadable run file took down the whole hash store with a 500.
-
-## Checks
+## `npm run doctor`
 
 ```bash
 npm run doctor                              # check the data folder
@@ -117,20 +114,17 @@ npm run doctor -- --data-dir /path/to/data
 npm run doctor -- --json                    # machine readable
 ```
 
-The store is plain files in git, so the failures worth catching are not crashes
-but states that are still valid JSON and are still wrong. The doctor is read
-only and reports, with a severity for each:
+Read only, reports with a severity for each finding. The failures worth catching
+are not crashes but states that are still valid JSON and still wrong:
 
 | Area | Checks |
 | --- | --- |
-| agents | file name matches the record's code, no two files claiming one code, no codes colliding by case, record parses, record matches the schema, set valued fields (`result_generated_files`, `executions`, `source_dependant_files`) free of duplicates and sorted, no absolute or `..` paths in them, `parent` points at an agent that exists |
-| hashes | run files parse, no two runs claiming one id, every path relative and inside the root, no path whose history repeats a hash, no history out of order, every folder hash equal to the rollup of its children's current hashes, the index listing every run |
-| data | `agents.schema.json` present, a leftover legacy `hashes.json`, the pre-migration backup, incomplete workspace settings |
+| agents | file name matches the record's code, no duplicate or case-colliding codes, records parse and match the schema, set valued fields free of duplicates and sorted, no absolute or `..` paths, `parent` points at an agent that exists |
+| hashes | run files parse, no two runs claiming one id, every path relative and inside the root, no repeated or out-of-order hashes, every folder hash equal to the rollup of its children, the index lists every run |
+| data | `agents.schema.json` present, no leftover legacy `hashes.json`, incomplete workspace settings |
 
-Exit code is `1` when anything is an error, so it can gate a commit or a build.
-A folder hash is recomputed with the very function the runner used
-(`rollupHash` in `server/hashRunner.js`), not a second implementation, so the
-check cannot drift from the writer.
+Exit code is `1` when anything is an error. A folder hash is recomputed with the
+very function the runner used, so the check cannot drift from the writer.
 
 ## Data layout
 
@@ -141,8 +135,6 @@ data/
   agents.schema.json    JSON Schema (draft 2020-12) every write is validated against
   agents/
     AG-001.json         one file per agent record - the file name is the agent code
-    AG-002.json
-    AG-003.json
   hashes/
     runs/*.json         one immutable file per hash run   [git ignored]
     index.json          derived cache (git ignored, rebuildable)
@@ -159,186 +151,26 @@ nature - so this repository ships an empty store and your first run fills it. A
 team that wants one shared store in git can opt in; see
 [`data/hashes/README.md`](data/hashes/README.md).
 
-`state.json` and `settings.json` are machine specific too, so they are git
-ignored. Both are also optional: a missing, empty or malformed one falls back to
+`state.json`, `settings.json` and the data-folder location are machine specific
+too, so they are git ignored, and a missing, empty or malformed one falls back to
 the defaults instead of breaking the app.
 
 ### The agent store
 
-- **One file per agent.** `data/agents/<code>.json` holds exactly that agent
-  object. No file holds the collection, so two agents can never overwrite each
-  other and a single record can be edited, diffed or version controlled alone.
 - **The code is the file name.** Codes are checked against
   `[A-Za-z0-9][A-Za-z0-9._-]*` before they become a path, so a code can never
   escape the folder. Changing a code in the edit popup renames the file.
-- **A file whose code disagrees with its name is refused.** `AG-777.json`
-  containing `"code": "AG-001"` cannot be addressed, renamed or deleted without
-  creating a second copy of the record, so it is reported as an error and left
-  out of the grid instead of appearing as a row that would write to the wrong
-  file. The error names the file and both codes. Two files whose codes differ
-  only in case are also reported: they are two files on Linux and one file on
-  macOS or Windows.
-- **Grid order is code order.** Files are read in any order and sorted by agent
-  code, so the grid never depends on the filesystem.
-- **A broken file is reported, not hidden.** A file that cannot be parsed, or
-  that does not match the schema, shows up as an error badge next to the grid
-  instead of silently disappearing.
-- An existing code returns `409`. Every write is validated against the schema
-  twice: once for the record (`$defs/agent`) and once for the collection it
-  would belong to.
+- **A file whose code disagrees with its name is refused**, with an error naming
+  the file and both codes, instead of appearing as a row that would write to the
+  wrong file. Codes that differ only in case are reported too: two files on
+  Linux, one file on macOS or Windows.
+- **Grid order is code order**, never the filesystem's.
+- **A broken file is reported, not hidden** - an error badge next to the grid
+  instead of a silent disappearance.
+- An existing code returns `409`; every write is validated twice, once for the
+  record and once for the collection it would belong to.
 
-## Tabs
-
-**Agents** - grid with one row per agent, ordered by code. Add, edit and delete
-write the matching file in `data/agents/` straight away. `+ Add agent` and the
-row *Edit* button both open the edit popup; the form is generated from
-`agents.schema.json`, so fields, types and required markers follow the schema.
-Saving posts the record to the server, which validates it and writes
-`data/agents/<code>.json`; a rejected record shows the list of errors in the
-popup and nothing is written. Editing the code renames the file.
-
-**Hashing** - text box with a folder path plus an *Explore* button that opens an
-in-app folder browser (no native dialog, no browser permission prompt). *Hash
-folder* walks the tree, streams progress and writes one run file. One line under
-the toolbar always shows the state, including the last file that was hashed, so a
-long run is visibly moving:
-
-```
-Hashing 118/990 files · 727 KB · last: src/lib/parser/vs_code.json
-```
-
-*Cancel* aborts the run: the server stops hashing and nothing is written at all -
-no run file, no index rebuild. Below the toolbar the store can be viewed as
-**Files**, **Folders** or **Runs**, sortable and filterable.
-
-### Reading the hash grids
-
-- **Yellow dot** - the row's newest hash differs from the one recorded before
-  it. Click a row to see the history behind it.
-- **`● N changed` is a switch** - click it to hide unchanged rows and leave only
-  the yellow-dotted ones, click again to show everything. The `N rows` badge
-  follows. The switch is hidden in the Runs view, where rows are scans rather
-  than files and carry no change flag.
-- **Click a file or folder row** to open its hash history: every recorded hash
-  with the date it was hashed, newest first, the newest one badged *latest*.
-- **Rows in the Runs view are not clickable** - a run is a scan of a folder, not
-  a file, so it has no hash history.
-- **Identical hashes are not stored twice.** Re-hashing an unchanged tree leaves
-  the history alone, so "3 hashes" means the content really changed three times
-  rather than "scanned three times". The run itself is always recorded as a run
-  file - even an empty one, so the Runs view still shows that the scan happened.
-- **The folder is remembered.** Picking a folder, hashing it, or leaving a path
-  in the text box stores it in `data/state.json`, and the next visit starts with
-  it in the box. An interrupted hash run wins over the stored value, so a reload
-  mid-run does not lose the target.
-
-**Settings** - configuration that outlives a session, kept in
-`data/settings.json`:
-
-- **Workspace folder** - the folder this workspace works in.
-- **Workspace git root location** - the git repository the workspace belongs to.
-
-Both are stored in `data/settings.json`. The *Link Changes to Agent* tab reads
-them, and they are only accepted as a valid pair:
-
-- both empty - nothing configured, allowed
-- only one filled in - refused; the two are configured together
-- the git root must be a folder containing a git repository (`.git`, either a
-  folder or a file as in a worktree checkout)
-- the workspace folder must be that git root itself or a folder inside it
-
-The rules live in `server/settingsValidation.js` and are enforced on save; the
-field that caused the refusal is highlighted in the tab. Pick a folder with
-*Browse…*; changes are saved when you leave a box, press Enter or press *Save*,
-and *Clear both* empties the pair. Saving either field refreshes the
-*Link Changes to Agent* tab immediately, since its file list depends on both.
-
-- **Data folder** - where the app keeps its JSON files. Empty means
-  `<repo>/data`. A folder that does not exist yet is created, and a missing
-  `agents.schema.json` is copied over from the current folder so the new one can
-  validate anything. Changing it reloads every tab, so the other tabs show the
-  new folder's agents, hashes and state at once.
-  The value cannot live inside the data folder - moving the folder would move
-  the setting that points at it - so it is remembered in `data-location.json`
-  next to `package.json` (git ignored). Startup precedence is
-  `--data-dir` / `JSONM_DATA_DIR` > this setting > `<repo>/data`; when the flag
-  is used the setting shows as *locked* and refuses to change.
-
-**Link Changes to Agent** - the files git still reports as changed inside the
-workspace folder, linked to an agent in one click. This tab is the first
-consumer of the two settings above.
-
-- Reads `git status --porcelain --untracked-files=all` at the workspace git
-  root. Modified, staged, added, renamed and untracked files are listed;
-  deleted and unmerged paths are skipped, as is anything outside the workspace
-  folder.
-- The grid shows the path **relative to the git root** (what actually gets
-  stored), the git status, the path relative to the workspace folder and the
-  size. Each row has a checkbox, with *Select all* and *Select none* always
-  available and an `N changed / N selected` badge.
-- Pick an agent from the dropdown (`CODE - Name`, read from the agent store)
-  and press **Link changes to agent**. Every checked file is appended to that
-  agent's `result_generated_files`, skipping paths already listed; the agent is
-  validated and written exactly like an edit from the agents tab.
-- Paths must be relative to the git root - absolute paths and `..` segments are
-  rejected. Linked files stay in the list, because they are still uncommitted;
-  commit them and they disappear on the next refresh.
-- Without a workspace configured the tab explains what to set instead of
-  showing an empty grid.
-
-## Hashing details
-
-- SHA-256, streamed per file, 8 files in parallel. Throughput on the machine
-  this was developed on: ~20 000 files / 79 MB in ~4.5 s.
-- Hidden files are included by default (tick *hidden* off to skip them).
-  Symlinks are skipped unless *follow symlinks* is ticked, which also prevents
-  symlink loops.
-- Folder hashes are rolled up bottom up: the hash of a folder is the SHA-256 of
-  `name \0 childHash \u001e` for each of its children (folders and files, sorted
-  by name). This is the same algorithm the previous browser-only version used,
-  verified to reproduce all 311 folder hashes that shipped in the original file
-  byte for byte, and an empty folder still hashes to `e3b0c442…b855` (the
-  digest of an empty string).
-- Hashing a folder that contains the store is self-referential: the run file is
-  written after the walk, so its own hash describes the pre-write content. Hash
-  something outside the data folder if that matters.
-
-## Hash storage: one immutable file per run
-
-```
-data/hashes/runs/2026-10-16T19-04-31-469Z_e6962ad2.json
-```
-
-```jsonc
-{
-  "id": "2026-10-16T19-04-31-469Z_e6962ad2",  // finishedAt + random suffix
-  "host": "laptop",                          // which machine hashed
-  "root": "/home/you/projects/thing",
-  "startedAt": "…", "finishedAt": "…", "durationMs": 524,
-  "stats": { "files": 990, "bytes": 4190372, "errors": 0, "changed": 3, "unchanged": 2425 },
-  "files":   [{ "path": "src/lib/main.js", "size": 2048, "mtime": "…", "hash": "…" }],
-  "folders": [{ "path": "src/lib", "hash": "…" }]
-}
-```
-
-A run file is **written once and never edited**. It records only the paths whose
-hash *changed*, so a run over an unchanged tree produces a tiny file, and two
-people who hashed at the same time produce two files that git merges without a
-conflict.
-
-`data/hashes/index.json` is derived from the run files, is git ignored, and is
-rebuilt automatically whenever a run file appears or changes.
-
-Current state is **computed, never stored**: a path's history is assembled from
-every run file, newest first. That is what makes the store safe to share - with a
-single shared `hashes.json` two users hashing anything collided on the same
-sorted document, and a merge could reorder a history so the grid showed a stale
-hash as current with no error anywhere.
-
-An old single `hashes.json` is converted once at startup into run files, and the
-original is kept as `data/hashes.migrated.json`.
-
-## API
+## HTTP API
 
 | Method + path | Purpose |
 | --- | --- |
@@ -360,7 +192,7 @@ original is kept as `data/hashes.migrated.json`.
 | `GET /api/fs?path=…` | one directory listing for the folder browser |
 | `POST /api/hash` | `{path, includeHidden, followSymlinks}` → newline delimited JSON progress stream |
 
-## Layout
+## Project layout
 
 ```
 package.json                  npm scripts and the four dependencies
@@ -373,14 +205,14 @@ webapp/server/
   agentsStore.js              one JSON file per agent in data/agents/
   agentsApi.js                CRUD for the agent files, GET /api/schema,
                               POST /api/agents/:code/link-files
-  agentsValidation.js          one agent record + its collection, shared by both
+  agentsValidation.js         one agent record + its collection, shared by both
   gitChanges.js               git status of the workspace folder, relative to the git root
   changesApi.js               GET /api/changes
   stateFile.js                shared read/write/atomic-write helper for the two small files
   stateStore.js               data/state.json, tolerant of a broken file
   stateApi.js                 GET/PUT /api/state
   settingsStore.js            data/settings.json, tolerant of a broken file
-  settingsValidation.js        workspace/git root rules enforced on save
+  settingsValidation.js       workspace/git root rules enforced on save
   settingsApi.js              GET/PUT /api/settings
   dataFolderApi.js            GET/PUT /api/data-folder, switch + schema carry-over
   fsApi.js                    GET /api/fs, path resolution and root jail
@@ -406,18 +238,12 @@ bundler), [ajv](https://ajv.js.org) 8.x + ajv-formats (schema validation).
 Hashing uses `node:crypto`, so there is no hashing dependency. Tests use
 `node:test`, so there is no test dependency either.
 
-The app itself is Apache-2.0; every dependency above is MIT.
-
-Requires Node 22 or newer (developed against Node 24).
-
 ## Documentation
 
 | | |
 | --- | --- |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | how it is built and why - the file to read first |
-| [`docs/llm-chats/`](docs/llm-chats/) | dated session records: decisions, measured facts, bugs found, open items |
 | [`data/hashes/README.md`](data/hashes/README.md) | what a hash run file is, and how to share a store through git |
-| `npm run doctor` | check a data folder without changing anything |
 
 ## License
 
