@@ -735,6 +735,22 @@ table.grid td.col-remove {
   color: var(--text-dim);
 }
 
+.hash-folder-empty {
+  flex: 1;
+  min-width: 280px;
+  padding: 6px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  background: var(--bg-sunken);
+  color: var(--text-faint);
+  font-size: 12.5px;
+}
+
+.hash-folder-empty strong {
+  color: var(--text);
+  font-weight: 550;
+}
+
 /* ------------------------------------------------------------- settings */
 
 .setting-block {
