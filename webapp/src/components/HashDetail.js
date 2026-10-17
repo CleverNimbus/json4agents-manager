@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2026 CleverNimbus
+ * SPDX-License-Identifier: Apache-2.0
+ */
 /**
  * Hash history popup: click a row in the hashing grid to see every hash that
  * was recorded for that file or folder, newest first.

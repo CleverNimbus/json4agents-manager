@@ -406,7 +406,7 @@ bundler), [ajv](https://ajv.js.org) 8.x + ajv-formats (schema validation).
 Hashing uses `node:crypto`, so there is no hashing dependency. Tests use
 `node:test`, so there is no test dependency either.
 
-The app itself is GPL-3.0; every dependency above is MIT.
+The app itself is Apache-2.0; every dependency above is MIT.
 
 Requires Node 22 or newer (developed against Node 24).
 
@@ -421,4 +421,4 @@ Requires Node 22 or newer (developed against Node 24).
 
 ## License
 
-[GPL-3.0](LICENSE) - see the `LICENSE` file.
+[Apache-2.0](LICENSE) - see the `LICENSE` and `NOTICE` files.

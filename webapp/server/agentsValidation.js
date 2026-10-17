@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2026 CleverNimbus
+ * SPDX-License-Identifier: Apache-2.0
+ */
 /**
  * Agent validation shared by the CRUD endpoints and the link-files endpoint:
  * a record has to satisfy $defs/agent on its own and the collection it would

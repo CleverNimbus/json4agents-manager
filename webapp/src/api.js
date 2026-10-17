@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2026 CleverNimbus
+ * SPDX-License-Identifier: Apache-2.0
+ */
 /**
  * Thin fetch wrappers around the JSON API.
  *
@@ -32,6 +36,9 @@ export const getAgents = () => request('/api/agents');
 export const getSchema = () => request('/api/schema');
 
 export const getHashes = () => request('/api/hashes');
+
+/** Discard the derived index and rebuild it from the run files. */
+export const rebuildHashIndex = () => request('/api/hashes/rebuild', { method: 'POST' });
 
 export const getState = () => request('/api/state');
 

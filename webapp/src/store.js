@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2026 CleverNimbus
+ * SPDX-License-Identifier: Apache-2.0
+ */
 /**
  * Shared reactive state and the actions that mutate it.
  *
@@ -32,9 +36,11 @@ export const store = reactive({
 
   hashes: {
     file: '',
-    doc: { folders: [], files: [], runs: [] },
+    doc: { folders: [], files: [], runs: [], broken: [] },
     loading: false,
     loaded: false,
+    /** True while the derived index is being rebuilt. */
+    rebuilding: false,
   },
 
   /** Remembered UI choices, persisted in data/state.json. */
@@ -224,12 +230,33 @@ export async function loadHashes() {
       folders: Array.isArray(data?.folders) ? data.folders : [],
       files: Array.isArray(data?.files) ? data.files : [],
       runs: Array.isArray(data?.runs) ? data.runs : [],
+      broken: Array.isArray(data?.broken) ? data.broken : [],
       sourceFolder: data?.sourceFolder ?? '',
       generated: data?.generated ?? '',
     };
     store.hashes.loaded = true;
   } finally {
     store.hashes.loading = false;
+  }
+}
+
+/**
+ * Throw the derived index away and build it again from the run files.
+ *
+ * The index is a cache, so this is safe to do at any time: only index.json is
+ * rewritten and no run file is touched. Used when the store looks wrong - a
+ * grid that disagrees with the runs, or a run file edited by hand.
+ *
+ * @returns {Promise<{runs:number, files:number, folders:number, broken:object[]}>}
+ */
+export async function rebuildHashIndex() {
+  store.hashes.rebuilding = true;
+  try {
+    const result = await api.rebuildHashIndex();
+    await loadHashes();
+    return result;
+  } finally {
+    store.hashes.rebuilding = false;
   }
 }
 

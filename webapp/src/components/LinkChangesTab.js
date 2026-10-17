@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2026 CleverNimbus
+ * SPDX-License-Identifier: Apache-2.0
+ */
 /**
  * Link Changes to Agent: uncommitted git files inside the workspace folder,
  * selectable, linked to an agent's result_generated_files as paths relative to

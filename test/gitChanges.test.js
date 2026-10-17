@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2026 CleverNimbus
+ * SPDX-License-Identifier: Apache-2.0
+ */
 /**
  * The Link Changes tab backend: what git reports as uncommitted inside the
  * workspace folder.

@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2026 CleverNimbus
+ * SPDX-License-Identifier: Apache-2.0
+ */
 /**
  * Shared plumbing for the small JSON files the UI owns: state.json and
  * settings.json inside the data folder.
