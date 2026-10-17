@@ -90,7 +90,7 @@ export default {
   setup() {
     /** Folder picked from the dropdown. Always one of `store.settings.hashFolders`. */
     const selectedFolder = ref('');
-    const includeHidden = ref(true);
+    const includeHidden = ref(false);
     const followSymlinks = ref(false);
     const view = ref('files');
     const filter = ref('');
@@ -305,7 +305,7 @@ export default {
         </button>
         <button v-else type="button" class="danger" @click="cancelHash">Cancel</button>
         <label class="check">
-          <input type="checkbox" v-model="includeHidden" :disabled="store.hashJob.running" /> hidden
+          <input type="checkbox" v-model="includeHidden" :disabled="store.hashJob.running" /> Include hidden
         </label>
         <label class="check">
           <input type="checkbox" v-model="followSymlinks" :disabled="store.hashJob.running" /> follow symlinks
