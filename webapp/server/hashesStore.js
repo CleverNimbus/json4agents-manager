@@ -140,9 +140,17 @@ export async function readBrokenRunFiles() {
 /**
  * Rebuild the derived index from the run files. Never committed, never merged:
  * it is a cache of what the run files say.
+ *
+ * Safe to call at any time: it only writes `index.json`, so a run file - the only
+ * thing in the store that is not reproducible - is never touched. Damaged run
+ * files are skipped and listed in `broken`, so rebuilding can never quietly lose
+ * a record without saying so.
+ *
+ * @returns {Promise<object>} the index, with `broken` naming unreadable run files
  */
 export async function rebuildIndex() {
   const runs = await readAllRuns();
+  const broken = await readBrokenRunFiles();
 
   /** path -> assembled history, newest first */
   const fileHistory = new Map();
@@ -167,6 +175,7 @@ export async function rebuildIndex() {
     version: INDEX_VERSION,
     generatedAt: new Date().toISOString(),
     sourceFolder: runs[0]?.root ?? '',
+    broken,
     runs: runs.map((run) => ({
       id: run.id,
       root: run.root,
@@ -226,6 +235,8 @@ export async function getView() {
   return {
     sourceFolder: index.sourceFolder,
     generated: index.runs[0]?.finishedAt ?? index.generatedAt,
+    /** Run files that could not be read; the store is served without them. */
+    broken: index.broken ?? [],
     runs: index.runs,
     files: index.files.map(toRow),
     folders: index.folders.map(toRow),

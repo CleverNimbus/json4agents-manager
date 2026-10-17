@@ -3,6 +3,7 @@
  *
  *   POST /api/hash   -> streams newline delimited JSON progress events
  *   GET  /api/hashes -> the history assembled from the hash run files
+ *   POST /api/hashes/rebuild -> discard and rebuild the derived index
  *
  * The stream keeps the browser's "last file hashed" line in sync while the
  * server works, and closing the connection (the Cancel button) aborts the run.
@@ -10,13 +11,34 @@
 import { Router } from 'express';
 import { files } from './config.js';
 import { hashFolder } from './hashRunner.js';
-import { getView, saveHashRun } from './hashesStore.js';
+import { getView, rebuildIndex, saveHashRun } from './hashesStore.js';
 import { resolveBrowsable } from './fsApi.js';
 
 export const hashRouter = Router();
 
 hashRouter.get('/api/hashes', async (req, res) => {
   res.json({ file: files.hashesDir, data: await getView() });
+});
+
+/**
+ * Discard the derived index and rebuild it from the run files.
+ *
+ * The index is a cache, so this is always safe: only `index.json` is written, and
+ * a run file - the one thing in the store that cannot be regenerated - is never
+ * touched. Damaged run files are skipped and reported in `broken` rather than
+ * dropped silently.
+ */
+hashRouter.post('/api/hashes/rebuild', async (req, res) => {
+  const index = await rebuildIndex();
+  return res.json({
+    ok: true,
+    index: files.hashesIndex,
+    generatedAt: index.generatedAt,
+    runs: index.runs.length,
+    files: index.files.length,
+    folders: index.folders.length,
+    broken: index.broken,
+  });
 });
 
 hashRouter.post('/api/hash', async (req, res) => {

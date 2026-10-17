@@ -33,6 +33,9 @@ export const getSchema = () => request('/api/schema');
 
 export const getHashes = () => request('/api/hashes');
 
+/** Discard the derived index and rebuild it from the run files. */
+export const rebuildHashIndex = () => request('/api/hashes/rebuild', { method: 'POST' });
+
 export const getState = () => request('/api/state');
 
 export const saveState = (patch) =>

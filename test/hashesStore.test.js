@@ -288,6 +288,101 @@ describe('the index', () => {
   });
 });
 
+describe('rebuildIndex', () => {
+  it('rebuilds the index from the run files and answers the same as before', async () => {
+    const tree = await buildTree(await tempDir('tree'), { 'a.txt': 'a', 'd/b.txt': 'b' });
+    await run(tree);
+    await fs.writeFile(path.join(tree, 'a.txt'), 'changed');
+    await run(tree);
+
+    const before = await getView();
+    const index = await rebuildIndex();
+    const after = await getView();
+
+    assert.deepEqual(after.files, before.files, 'the served history is unchanged');
+    assert.equal(index.files.length, 2);
+    assert.equal(index.runs.length, 2);
+  });
+
+  it('replaces an index that was written by hand', async () => {
+    const tree = await buildTree(await tempDir('tree'), { 'a.txt': 'a' });
+    await run(tree);
+
+    const indexFile = path.join(dir, 'hashes', 'index.json');
+    await write(indexFile, { version: 2, signature: 'stale', files: [{ path: 'ghost', history: [] }] });
+
+    const index = await rebuildIndex();
+    assert.ok(!index.files.some((f) => f.path === 'ghost'), 'the stale content is gone');
+    assert.equal(index.files.length, 1);
+    assert.notEqual(index.signature, 'stale');
+  });
+
+  it('rebuilds an index whose file version is older than this code', async () => {
+    const tree = await buildTree(await tempDir('tree'), { 'a.txt': 'a' });
+    await run(tree);
+
+    const indexFile = path.join(dir, 'hashes', 'index.json');
+    const stale = await readJson(indexFile);
+    await write(indexFile, { ...stale, version: 1 });
+
+    const served = await getView();
+    assert.equal(served.files.length, 1, 'an old index version is not trusted');
+  });
+
+  it('produces an empty index when there are no runs at all', async () => {
+    const index = await rebuildIndex();
+    assert.deepEqual(index.files, []);
+    assert.deepEqual(index.folders, []);
+    assert.deepEqual(index.runs, []);
+    assert.equal(index.sourceFolder, '');
+    assert.deepEqual(await getView().then((v) => v.files), [], 'and the served view is empty, not broken');
+  });
+
+  it('skips a damaged run file and says how many runs it could read', async () => {
+    const tree = await buildTree(await tempDir('tree'), { 'a.txt': 'a' });
+    await run(tree);
+    await write(path.join(runsDir(), 'garbage.json'), '{ not json');
+
+    const result = await rebuildIndex();
+    assert.equal(result.runs.length, 1);
+    assert.deepEqual(result.broken.map((b) => b.file), ['garbage.json'], 'the damage is reported, not hidden');
+  });
+
+  it('never touches a run file', async () => {
+    const tree = await buildTree(await tempDir('tree'), { 'a.txt': 'a' });
+    await run(tree);
+    const before = new Map();
+    for (const name of await runNames()) before.set(name, await fs.readFile(path.join(runsDir(), name)));
+
+    await rebuildIndex();
+    await rebuildIndex();
+
+    for (const [name, content] of before) {
+      assert.deepEqual(await fs.readFile(path.join(runsDir(), name)), content, `${name} must be byte identical`);
+    }
+    assert.deepEqual(await runNames(), [...before.keys()]);
+  });
+
+  it('leaves the run files alone even when every one of them is damaged', async () => {
+    await write(path.join(runsDir(), 'garbage.json'), '{ not json');
+    const result = await rebuildIndex();
+
+    assert.deepEqual(result.files, []);
+    assert.equal(result.broken.length, 1);
+    assert.deepEqual(await runNames(), ['garbage.json'], 'the damaged file is still there to look at');
+  });
+
+  it('says how long it took and which folder it covers', async () => {
+    const tree = await buildTree(await tempDir('tree'), { 'a.txt': 'a' });
+    await run(tree);
+
+    const result = await rebuildIndex();
+    assert.equal(result.sourceFolder, tree);
+    assert.ok(Date.parse(result.generatedAt) > 0);
+    assert.equal(await exists(path.join(dir, 'hashes', 'index.json')), true, 'the index is written');
+  });
+});
+
 describe('migrateLegacyHashes', () => {
   const stamp = (time) => ({ startedAt: time, finishedAt: time });
 

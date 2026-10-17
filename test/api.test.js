@@ -279,6 +279,80 @@ describe('POST /api/hash', () => {
   });
 });
 
+describe('POST /api/hashes/rebuild', () => {
+  it('rebuilds the index from the run files and serves the same history', async () => {
+    const tree = await buildTree(await tempDir('tree'), { 'a.txt': 'a' });
+    await streamHash(api.url, tree);
+    await fs.writeFile(path.join(tree, 'a.txt'), 'b');
+    await streamHash(api.url, tree);
+
+    const before = (await api.get('/api/hashes')).body.data;
+    const indexFile = path.join(dir, 'hashes', 'index.json');
+    const stored = JSON.parse(await fs.readFile(indexFile, 'utf8'));
+    await write(indexFile, { ...stored, files: [], folders: [], runs: [] });
+
+    const { status, body } = await api.post('/api/hashes/rebuild');
+    assert.equal(status, 200);
+    assert.equal(body.runs, 2);
+    assert.equal(body.files, 1);
+    assert.equal(body.folders, 1);
+
+    const after = (await api.get('/api/hashes')).body.data;
+    assert.deepEqual(after.files, before.files, 'the history is back exactly as it was');
+    assert.deepEqual(after.runs, before.runs);
+  });
+
+  it('reports which run files it could not read, and still serves the rest', async () => {
+    const tree = await buildTree(await tempDir('tree'), { 'a.txt': 'a' });
+    await streamHash(api.url, tree);
+    await write(path.join(dir, 'hashes', 'runs', 'garbage.json'), '{ not json');
+
+    const { body } = await api.post('/api/hashes/rebuild');
+    assert.equal(body.runs, 1, 'the readable run is still counted');
+    assert.equal(body.broken.length, 1);
+    assert.equal(body.broken[0].file, 'garbage.json');
+
+    const served = (await api.get('/api/hashes')).body.data;
+    assert.equal(served.files.length, 1);
+    assert.equal(served.broken.length, 1, 'and the damage is visible in the tab');
+  });
+
+  it('never modifies a run file', async () => {
+    const tree = await buildTree(await tempDir('tree'), { 'a.txt': 'a' });
+    await streamHash(api.url, tree);
+    const runsDir = path.join(dir, 'hashes', 'runs');
+    const before = new Map();
+    for (const name of await listNames(runsDir)) before.set(name, await fs.readFile(path.join(runsDir, name)));
+
+    await api.post('/api/hashes/rebuild');
+
+    assert.deepEqual(await listNames(runsDir), [...before.keys()]);
+    for (const [name, content] of before) {
+      assert.deepEqual(await fs.readFile(path.join(runsDir, name)), content);
+    }
+  });
+
+  it('is harmless on a store with nothing in it', async () => {
+    const { status, body } = await api.post('/api/hashes/rebuild');
+    assert.equal(status, 200);
+    assert.equal(body.runs, 0);
+    assert.deepEqual(body.broken, []);
+    assert.equal((await api.get('/api/hashes')).body.data.runs.length, 0);
+  });
+
+  it('leaves the store usable when every run file is damaged', async () => {
+    await write(path.join(dir, 'hashes', 'runs', 'garbage.json'), '{ not json');
+    const { status, body } = await api.post('/api/hashes/rebuild');
+    assert.equal(status, 200);
+    assert.equal(body.runs, 0);
+    assert.equal(body.broken.length, 1);
+
+    const served = await api.get('/api/hashes');
+    assert.equal(served.status, 200);
+    assert.deepEqual(served.body.data.files, []);
+  });
+});
+
 describe('GET /api/hashes', () => {
   it('serves the history assembled from the run files', async () => {
     const tree = await buildTree(await tempDir('tree'), { 'a.txt': 'a' });

@@ -3,7 +3,16 @@ import DataTable from './DataTable.js';
 import FolderPicker from './FolderPicker.js';
 import HashDetail from './HashDetail.js';
 import { formatBytes, formatDuration, formatTime, latestHash, shortHash } from '../format.js';
-import { cancelHash, loadHashes, loadState, rememberHashFolder, setBanner, startHash, store } from '../store.js';
+import {
+  cancelHash,
+  loadHashes,
+  loadState,
+  rebuildHashIndex,
+  rememberHashFolder,
+  setBanner,
+  startHash,
+  store,
+} from '../store.js';
 
 /**
  * First column of the file and folder grids. It is empty unless the row's
@@ -183,6 +192,27 @@ export default {
       if (target !== '') rememberHashFolder(target);
     };
 
+    /**
+     * Throw the derived index away and build it again from the run files. Only
+     * `index.json` is rewritten; no run file is touched, so this is safe to try
+     * whenever the grids disagree with the runs.
+     */
+    const rebuildIndex = async () => {
+      try {
+        const result = await rebuildHashIndex();
+        const parts = [`${result.runs} run${result.runs === 1 ? '' : 's'}`, `${result.files} files`, `${result.folders} folders`];
+        setBanner(
+          result.broken.length > 0 ? 'error' : 'info',
+          `Index rebuilt from ${parts.join(' · ')}.` +
+            (result.broken.length > 0
+              ? ` ${result.broken.length} run file(s) could not be read: ${result.broken.map((b) => b.file).join(', ')}`
+              : ''),
+        );
+      } catch (err) {
+        setBanner('error', `Could not rebuild the index: ${err.message}`);
+      }
+    };
+
     // A data folder change swaps state.json underneath us. Take the folder
     // remembered there unless the user already typed or hashed something.
     watch(
@@ -209,6 +239,7 @@ export default {
       openDetail,
       path,
       picker,
+      rebuildIndex,
       rowKey,
       run,
       showChangedToggle,
@@ -270,7 +301,21 @@ export default {
         >
           ● {{ changedCount }} changed
         </button>
+        <span
+          v-if="store.hashes.doc.broken.length > 0"
+          class="badge"
+          :title="store.hashes.doc.broken.map((b) => b.file + ': ' + b.message).join('\n')"
+          >{{ store.hashes.doc.broken.length }} unreadable run file{{ store.hashes.doc.broken.length === 1 ? '' : 's' }}</span
+        >
         <span class="spacer"></span>
+        <button
+          type="button"
+          :disabled="store.hashes.rebuilding || store.hashJob.running"
+          title="Throw the derived index away and rebuild it from the run files. Run files are never modified."
+          @click="rebuildIndex"
+        >
+          {{ store.hashes.rebuilding ? 'Rebuilding…' : 'Rebuild index' }}
+        </button>
         <span class="badge">{{ visibleRows.length }} rows</span>
         <span class="badge" :title="store.hashes.file">{{ store.hashes.file }}</span>
       </div>
