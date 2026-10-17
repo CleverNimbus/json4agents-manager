@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import AgentsTab from './AgentsTab.js';
+import AgentDependenciesTab from './AgentDependenciesTab.js';
 import HashingTab from './HashingTab.js';
 import LinkChangesTab from './LinkChangesTab.js';
 import SettingsTab from './SettingsTab.js';
@@ -10,10 +11,11 @@ import { store } from '../store.js';
 
 export default {
   name: 'JsonManagerApp',
-  components: { AgentsTab, HashingTab, LinkChangesTab, SettingsTab },
+  components: { AgentsTab, AgentDependenciesTab, HashingTab, LinkChangesTab, SettingsTab },
   setup() {
     const tabs = [
       { id: 'agents', label: 'Agents' },
+      { id: 'dependencies', label: 'Agent Dependencies' },
       { id: 'hashing', label: 'Hashing' },
       { id: 'link', label: 'Link Changes to Agent' },
       { id: 'settings', label: 'Settings' },
@@ -44,6 +46,7 @@ export default {
 
       <main class="content">
         <AgentsTab v-show="store.activeTab === 'agents'" />
+        <AgentDependenciesTab v-show="store.activeTab === 'dependencies'" />
         <HashingTab v-show="store.activeTab === 'hashing'" />
         <LinkChangesTab v-show="store.activeTab === 'link'" />
         <SettingsTab v-show="store.activeTab === 'settings'" />

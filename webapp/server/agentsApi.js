@@ -79,8 +79,10 @@ agentsRouter.delete('/api/agents/:code', async (req, res) => {
 });
 
 /**
- * Link uncommitted files to an agent: adds each path to the agent's
- * result_generated_files, keeping the order and skipping paths already listed.
+ * Link uncommitted files to an agent: the parent folder of each path is
+ * added to the agent's `result_generated_files` as `<folder>/*`, with
+ * duplicates of the same folder collapsed. A file at the git root is
+ * recorded as `./*`, so every entry is unambiguous about naming a folder.
  * Paths must be relative to the configured git root.
  */
 agentsRouter.post('/api/agents/:code/link-files', async (req, res) => {
@@ -100,17 +102,25 @@ agentsRouter.post('/api/agents/:code/link-files', async (req, res) => {
   const { gitRoot } = await readSettings();
   const agent = await readAgent(req.params.code);
   const existing = Array.isArray(agent.result_generated_files) ? agent.result_generated_files : [];
-  const known = new Set(existing);
+  const existingSet = new Set(existing);
 
-  const added = [];
-  for (const entry of paths.map((value) => value.trim())) {
-    if (known.has(entry)) continue;
-    known.add(entry);
-    added.push(entry);
+  // Group the changed files by their parent folder, keeping the order in
+  // which each folder is first seen. A file's folder reference is
+  // `<dirname>/*` - `./*` for a file at the git root.
+  const trimmed = paths.map((value) => value.trim());
+  const folderEntries = [];
+  const seen = new Set();
+  for (const file of trimmed) {
+    const entry = `${path.dirname(file)}/*`;
+    if (seen.has(entry)) continue;
+    seen.add(entry);
+    folderEntries.push(entry);
   }
 
+  const added = folderEntries.filter((entry) => !existingSet.has(entry));
+
   if (added.length === 0) {
-    return res.json({ ok: true, file: pathFor(agent.code), agent, added: [], alreadyPresent: paths.length, gitRoot });
+    return res.json({ ok: true, file: pathFor(agent.code), agent, added: [], alreadyPresent: folderEntries.length, gitRoot });
   }
 
   const updated = { ...agent, result_generated_files: [...existing, ...added] };
@@ -125,7 +135,7 @@ agentsRouter.post('/api/agents/:code/link-files', async (req, res) => {
     file: pathFor(saved.code),
     agent: saved,
     added,
-    alreadyPresent: paths.length - added.length,
+    alreadyPresent: folderEntries.length - added.length,
     gitRoot,
   });
 });

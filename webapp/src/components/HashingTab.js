@@ -4,6 +4,7 @@
  */
 import { computed, reactive, ref, watch } from 'vue';
 import DataTable from './DataTable.js';
+import ExecutionPlanPanel from './ExecutionPlanPanel.js';
 import FolderPicker from './FolderPicker.js';
 import HashDetail from './HashDetail.js';
 import { formatBytes, formatDuration, formatTime, latestHash, shortHash } from '../format.js';
@@ -85,7 +86,7 @@ const runColumns = [
 
 export default {
   name: 'HashingTab',
-  components: { DataTable, FolderPicker, HashDetail },
+  components: { DataTable, ExecutionPlanPanel, FolderPicker, HashDetail },
   setup() {
     const path = ref(store.hashJob.root || '');
     const includeHidden = ref(true);
@@ -283,64 +284,71 @@ export default {
 
       <p class="progress" :class="store.hashJob.phase">{{ store.hashJob.progressText }}</p>
 
-      <div class="toolbar">
-        <div class="segmented">
-          <button
-            v-for="entry in views"
-            :key="entry.id"
-            type="button"
-            :class="{ active: view === entry.id }"
-            @click="view = entry.id"
-          >{{ entry.label }}</button>
-        </div>
-        <input v-model="filter" class="filter" type="search" placeholder="Filter by path …" />
-        <button
-          v-if="showChangedToggle"
-          type="button"
-          class="badge toggle"
-          :class="{ active: changedOnly }"
-          :aria-pressed="changedOnly"
-          :title="changedOnly ? 'Showing changed files only — click to show all' : 'Click to hide unchanged files'"
-          @click="toggleChangedOnly"
-        >
-          ● {{ changedCount }} changed
-        </button>
-        <span
-          v-if="store.hashes.doc.broken.length > 0"
-          class="badge"
-          :title="store.hashes.doc.broken.map((b) => b.file + ': ' + b.message).join('\n')"
-          >{{ store.hashes.doc.broken.length }} unreadable run file{{ store.hashes.doc.broken.length === 1 ? '' : 's' }}</span
-        >
-        <span class="spacer"></span>
-        <button
-          type="button"
-          :disabled="store.hashes.rebuilding || store.hashJob.running"
-          title="Throw the derived index away and rebuild it from the run files. Run files are never modified."
-          @click="rebuildIndex"
-        >
-          {{ store.hashes.rebuilding ? 'Rebuilding…' : 'Rebuild index' }}
-        </button>
-        <span class="badge">{{ visibleRows.length }} rows</span>
-        <span class="badge" :title="store.hashes.file">{{ store.hashes.file }}</span>
-      </div>
+      <div class="hashing-split">
+        <aside class="hashing-left">
+          <ExecutionPlanPanel />
+        </aside>
+        <div class="hashing-right">
+          <div class="toolbar">
+            <div class="segmented">
+              <button
+                v-for="entry in views"
+                :key="entry.id"
+                type="button"
+                :class="{ active: view === entry.id }"
+                @click="view = entry.id"
+              >{{ entry.label }}</button>
+            </div>
+            <input v-model="filter" class="filter" type="search" placeholder="Filter by path …" />
+            <button
+              v-if="showChangedToggle"
+              type="button"
+              class="badge toggle"
+              :class="{ active: changedOnly }"
+              :aria-pressed="changedOnly"
+              :title="changedOnly ? 'Showing changed files only — click to show all' : 'Click to hide unchanged files'"
+              @click="toggleChangedOnly"
+            >
+              ● {{ changedCount }} changed
+            </button>
+            <span
+              v-if="store.hashes.doc.broken.length > 0"
+              class="badge"
+              :title="store.hashes.doc.broken.map((b) => b.file + ': ' + b.message).join('\\n')"
+              >{{ store.hashes.doc.broken.length }} unreadable run file{{ store.hashes.doc.broken.length === 1 ? '' : 's' }}</span
+            >
+            <span class="spacer"></span>
+            <button
+              type="button"
+              :disabled="store.hashes.rebuilding || store.hashJob.running"
+              title="Throw the derived index away and rebuild it from the run files. Run files are never modified."
+              @click="rebuildIndex"
+            >
+              {{ store.hashes.rebuilding ? 'Rebuilding…' : 'Rebuild index' }}
+            </button>
+            <span class="badge">{{ visibleRows.length }} rows</span>
+            <span class="badge" :title="store.hashes.file">{{ store.hashes.file }}</span>
+          </div>
 
-      <DataTable
-        :columns="columns"
-        :rows="visibleRows"
-        :row-key="rowKey"
-        default-sort="path"
-        :empty-text="emptyText"
-        :clickable="clickable"
-        @row-click="openDetail"
-      >
-        <template #cell-mark="{ row }">
-          <span
-            v-if="row.changed"
-            class="dot-changed"
-            title="The hash changed since the previous recorded hash"
-          ></span>
-        </template>
-      </DataTable>
+          <DataTable
+            :columns="columns"
+            :rows="visibleRows"
+            :row-key="rowKey"
+            default-sort="path"
+            :empty-text="emptyText"
+            :clickable="clickable"
+            @row-click="openDetail"
+          >
+            <template #cell-mark="{ row }">
+              <span
+                v-if="row.changed"
+                class="dot-changed"
+                title="The hash changed since the previous recorded hash"
+              ></span>
+            </template>
+          </DataTable>
+        </div>
+      </div>
 
       <FolderPicker
         v-if="picker.open"

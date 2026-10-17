@@ -100,7 +100,7 @@ export default {
         const parts = [`${result.added.length} added`];
         if (result.alreadyPresent > 0) parts.push(`${result.alreadyPresent} already listed`);
         parts.push(`in data/agents/${result.agent.code}.json`);
-        setBanner('info', `Linked ${result.added.length} file(s): ${parts.join(', ')}.`);
+        setBanner('info', `Linked ${result.added.length} folder(s): ${parts.join(', ')}.`);
       } catch (err) {
         error.value = err.message;
         setBanner('error', `Could not link the files: ${err.message}`);
