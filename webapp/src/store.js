@@ -65,6 +65,16 @@ export const store = reactive({
     loaded: false,
   },
 
+  /** Published execution receipts from data/executions/ (committed to git). */
+  executions: {
+    configured: false,
+    gitRoot: '',
+    list: [],
+    broken: [],
+    loading: false,
+    loaded: false,
+  },
+
   /** Remembered UI choices, persisted in data/state.json. */
   state: {
     file: '',
@@ -151,6 +161,7 @@ function invalidateDataCaches() {
   store.hashes.loaded = false;
   store.dependencies.loaded = false;
   store.executionPlan.loaded = false;
+  store.executions.loaded = false;
   store.state.loaded = false;
   store.settings.loaded = false;
 }
@@ -168,6 +179,7 @@ export async function reloadAll() {
     ['hashes', loadHashes],
     ['dependencies', loadDependencies],
     ['execution-plan', loadExecutionPlan],
+    ['executions', loadExecutions],
     ['state', loadState],
     ['settings', loadSettings],
   ];
@@ -338,6 +350,38 @@ export async function setExecutionStepDone(code, done) {
   } catch (err) {
     step.done = previous;
     throw err;
+  }
+}
+
+/**
+ * Read every published execution receipt. The server also checks each one
+ * against git and attaches a status: 'valid', 'stale-inputs', 'diverged' or
+ * 'unknown' (no workspace configured / git unavailable).
+ */
+export async function loadExecutions() {
+  store.executions.loading = true;
+  try {
+    const view = await api.getExecutions();
+    store.executions.configured = view?.configured === true;
+    store.executions.gitRoot = typeof view?.gitRoot === 'string' ? view.gitRoot : '';
+    store.executions.list = Array.isArray(view?.receipts) ? view.receipts : [];
+    store.executions.broken = Array.isArray(view?.broken) ? view.broken : [];
+    store.executions.loaded = true;
+  } finally {
+    store.executions.loading = false;
+  }
+}
+
+/**
+ * Publish a receipt for the selected generated files. Errors bubble up to the
+ * caller (the Link Changes tab shows them in the banner); the list is
+ * refreshed either way so a 409 shows the receipts that already exist.
+ */
+export async function publishExecution(agent, paths) {
+  try {
+    return await api.recordExecution(agent, paths);
+  } finally {
+    await loadExecutions().catch(() => {});
   }
 }
 

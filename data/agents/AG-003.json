@@ -8,6 +8,5 @@
   "source_dependant_files": [
     "tests/test_main.py"
   ],
-  "result_generated_files": [],
-  "executions": []
+  "result_generated_files": []
 }

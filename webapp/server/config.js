@@ -182,4 +182,8 @@ export const files = {
   get executionPlan() {
     return path.join(config.dataDir, 'execution-plan.json');
   },
+  /** Execution receipts: one immutable file per published run, committed to git. */
+  get executionsDir() {
+    return path.join(config.dataDir, 'executions');
+  },
 };

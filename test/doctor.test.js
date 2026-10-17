@@ -300,11 +300,67 @@ describe('npm run doctor', () => {
     assert.ok(warnings.some((m) => /workspace settings are incomplete/.test(m)));
   });
 
+  it('notes that no receipts are recorded yet', async () => {
+    const dir = await healthyData();
+    const notes = (await findings(dir)).map((f) => f.message);
+    assert.ok(notes.some((m) => /No execution receipts recorded yet/.test(m)));
+  });
+
+  it('reports a receipt that cannot be read', async () => {
+    const dir = await healthyData();
+    await write(path.join(dir, 'executions', 'garbage.json'), '{ not json');
+    assert.ok(areas(await findings(dir)).some((line) => /Receipt .*garbage\.json cannot be read/.test(line)));
+  });
+
+  it('warns about a receipt naming an agent that does not exist', async () => {
+    const dir = await healthyData();
+    await write(path.join(dir, 'executions', '2026-01-01T00-00-00-000Z_x.json'), {
+      id: '2026-01-01T00-00-00-000Z_x',
+      agent: 'NOPE',
+      recordedAt: '2026-01-01T00:00:00.000Z',
+      inputs: [],
+      outputs: [{ path: 'out/a.md', blob: 'a'.repeat(40), sha256: sha256('a') }],
+    });
+    const warnings = (await findings(dir)).filter((f) => f.level === 'warning').map((f) => f.message);
+    assert.ok(warnings.some((m) => /names agent NOPE, which does not exist/.test(m)));
+  });
+
+  it('reports an absolute path inside a receipt', async () => {
+    const dir = await healthyData();
+    await write(path.join(dir, 'executions', '2026-01-01T00-00-00-000Z_x.json'), {
+      id: '2026-01-01T00-00-00-000Z_x',
+      agent: 'AG-001',
+      recordedAt: '2026-01-01T00:00:00.000Z',
+      inputs: [],
+      outputs: [{ path: '/etc/shadow', blob: 'a'.repeat(40), sha256: sha256('a') }],
+    });
+    assert.ok(areas(await findings(dir)).some((line) => /holds an absolute path/.test(line)));
+  });
+
+  it('reports the same output published twice under unchanged inputs', async () => {
+    const dir = await healthyData();
+    const inputs = [{ path: 'src/input.txt', blob: 'b'.repeat(40), sha256: sha256('in') }];
+    for (const [id, hash] of [
+      ['2026-01-01T00-00-00-000Z_1', sha256('first')],
+      ['2026-01-02T00-00-00-000Z_2', sha256('second')],
+    ]) {
+      await write(path.join(dir, 'executions', `${id}.json`), {
+        id,
+        agent: 'AG-001',
+        recordedAt: '2026-01-01T00:00:00.000Z',
+        inputs,
+        outputs: [{ path: 'out/report.md', blob: 'c'.repeat(40), sha256: hash }],
+      });
+    }
+    assert.ok(areas(await findings(dir)).some((line) => /changed under unchanged inputs/.test(line)));
+  });
+
   it('says which folder it looked at, and can be read as JSON', async () => {
     const dir = await healthyData();
     const report = JSON.parse((await doctor(dir, ['--json'])).stdout);
     assert.equal(report.dataDir, dir);
     assert.equal(report.agents, 2);
+    assert.equal(report.receipts, 0);
     assert.ok(Array.isArray(report.findings));
   });
 });

@@ -28,13 +28,14 @@ export default {
     rows: { type: Array, default: () => [] },
     rowKey: { type: String, default: '' },
     defaultSort: { type: String, default: '' },
+    defaultDir: { type: String, default: 'asc' },
     emptyText: { type: String, default: 'Nothing to show' },
     clickable: { type: Boolean, default: false },
     maxRows: { type: Number, default: 2000 },
   },
   emits: ['row-click'],
   data() {
-    return { sortKey: this.defaultSort, sortDir: 'asc', showAll: false };
+    return { sortKey: this.defaultSort, sortDir: this.defaultDir === 'desc' ? 'desc' : 'asc', showAll: false };
   },
   computed: {
     sortedRows() {
