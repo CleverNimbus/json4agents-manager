@@ -46,7 +46,7 @@ hashRouter.post('/api/hashes/rebuild', async (req, res) => {
 });
 
 hashRouter.post('/api/hash', async (req, res) => {
-  const { path: target, includeHidden = true, followSymlinks = false } = req.body ?? {};
+  const { path: target, includeHidden = false, followSymlinks = false } = req.body ?? {};
   if (typeof target !== 'string' || target.trim() === '') {
     return res.status(400).json({ error: 'A folder path is required' });
   }

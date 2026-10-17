@@ -41,6 +41,28 @@ export const store = reactive({
     loaded: false,
     /** True while the derived index is being rebuilt. */
     rebuilding: false,
+    /**
+     * Bumped every time `loadHashes` finishes, so listeners (e.g. the
+     * execution plan) can re-derive themselves without re-fetching agents.
+     */
+    revision: 0,
+  },
+
+  /** Computed producer -> consumer graph for the Agent Dependencies tab. */
+  dependencies: {
+    agents: [],
+    edges: [],
+    loading: false,
+    loaded: false,
+  },
+
+  /** Computed execution order for the Hashing tab (left panel). */
+  executionPlan: {
+    generatedAt: '',
+    changedPaths: [],
+    steps: [],
+    loading: false,
+    loaded: false,
   },
 
   /** Remembered UI choices, persisted in data/state.json. */
@@ -55,6 +77,7 @@ export const store = reactive({
     file: '',
     workspaceFolder: '',
     gitRoot: '',
+    hashFolders: [],
     updatedAt: '',
     loaded: false,
     /** Bumped on every successful save; views that depend on it watch this. */
@@ -126,6 +149,8 @@ function invalidateDataCaches() {
   store.schema = null;
   store.agents.loaded = false;
   store.hashes.loaded = false;
+  store.dependencies.loaded = false;
+  store.executionPlan.loaded = false;
   store.state.loaded = false;
   store.settings.loaded = false;
 }
@@ -141,6 +166,8 @@ export async function reloadAll() {
     ['agents', loadAgents],
     ['schema', loadSchema],
     ['hashes', loadHashes],
+    ['dependencies', loadDependencies],
+    ['execution-plan', loadExecutionPlan],
     ['state', loadState],
     ['settings', loadSettings],
   ];
@@ -235,8 +262,82 @@ export async function loadHashes() {
       generated: data?.generated ?? '',
     };
     store.hashes.loaded = true;
+    // Listeners (e.g. the execution plan panel) derive themselves from the
+    // hashes, so bumping this counter is the signal that the data moved.
+    store.hashes.revision += 1;
   } finally {
     store.hashes.loading = false;
+  }
+}
+
+/**
+ * Fetch the computed agent dependency graph. The server derives this from each
+ * agent's `result_generated_files` and `source_dependant_files`; the client
+ * only renders it.
+ */
+export async function loadDependencies() {
+  store.dependencies.loading = true;
+  try {
+    const graph = await api.getDependencies();
+    store.dependencies.agents = Array.isArray(graph?.agents) ? graph.agents : [];
+    store.dependencies.edges = Array.isArray(graph?.edges) ? graph.edges : [];
+    store.dependencies.loaded = true;
+  } finally {
+    store.dependencies.loading = false;
+  }
+}
+
+/**
+ * Fetch the saved execution plan for the Hashing tab. Returns the empty
+ * shape when the file does not exist, so the panel can render its "no
+ * plan yet" state.
+ */
+export async function loadExecutionPlan() {
+  store.executionPlan.loading = true;
+  try {
+    const plan = await api.getExecutionPlan();
+    store.executionPlan.generatedAt = typeof plan?.generatedAt === 'string' ? plan.generatedAt : '';
+    store.executionPlan.changedPaths = Array.isArray(plan?.changedPaths) ? plan.changedPaths : [];
+    store.executionPlan.steps = Array.isArray(plan?.steps) ? plan.steps : [];
+    store.executionPlan.loaded = true;
+  } finally {
+    store.executionPlan.loading = false;
+  }
+}
+
+/**
+ * Recompute the plan from the current hashes + agents and persist it. The
+ * response is the new saved plan, with all `done` flags reset to false.
+ */
+export async function generateExecutionPlan() {
+  store.executionPlan.loading = true;
+  try {
+    const plan = await api.generateExecutionPlan();
+    store.executionPlan.generatedAt = typeof plan?.generatedAt === 'string' ? plan.generatedAt : '';
+    store.executionPlan.changedPaths = Array.isArray(plan?.changedPaths) ? plan.changedPaths : [];
+    store.executionPlan.steps = Array.isArray(plan?.steps) ? plan.steps : [];
+    store.executionPlan.loaded = true;
+  } finally {
+    store.executionPlan.loading = false;
+  }
+}
+
+/**
+ * Persist a `done` toggle for a single step. The local store is updated
+ * optimistically so the checkbox reflects the click immediately.
+ */
+export async function setExecutionStepDone(code, done) {
+  const steps = store.executionPlan.steps;
+  const step = steps.find((entry) => entry.code === code);
+  if (!step) return;
+  const previous = step.done;
+  if (previous === done) return;
+  step.done = done;
+  try {
+    await api.patchExecutionPlan({ steps: [{ code, done }] });
+  } catch (err) {
+    step.done = previous;
+    throw err;
   }
 }
 
@@ -339,6 +440,7 @@ export async function loadSettings() {
     store.settings.file = file;
     store.settings.workspaceFolder = settings?.workspaceFolder ?? '';
     store.settings.gitRoot = settings?.gitRoot ?? '';
+    store.settings.hashFolders = Array.isArray(settings?.hashFolders) ? settings.hashFolders : [];
     store.settings.updatedAt = settings?.updatedAt ?? '';
   } catch {
     /* defaults are fine */
@@ -357,6 +459,7 @@ export async function saveSettings(patch) {
   const { settings } = await api.saveSettings(patch);
   store.settings.workspaceFolder = settings.workspaceFolder;
   store.settings.gitRoot = settings.gitRoot;
+  store.settings.hashFolders = Array.isArray(settings.hashFolders) ? settings.hashFolders : [];
   store.settings.updatedAt = settings.updatedAt;
   store.settings.loaded = true;
   // Anything derived from the workspace (the changes tab) watches this and

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { computed, reactive, ref } from 'vue';
+import DataTable from './DataTable.js';
 import FolderPicker from './FolderPicker.js';
 import { formatTime } from '../format.js';
 import {
@@ -32,7 +33,7 @@ const FIELDS = [
 
 export default {
   name: 'SettingsTab',
-  components: { FolderPicker },
+  components: { DataTable, FolderPicker },
   setup() {
     const values = reactive({ workspaceFolder: '', gitRoot: '' });
     const saving = ref(false);
@@ -47,6 +48,18 @@ export default {
     const dataFolderError = ref('');
     const dataFolderSaving = ref(false);
     const dataFolderPicker = reactive({ open: false });
+
+    // Hash folder collection: a list of paths the user wants to hash often. The
+    // grid mirrors the store; every add/remove persists via saveSettings.
+    const hashFolderDraft = ref('');
+    const hashFolderError = ref('');
+    const hashFolderSaving = ref(false);
+    const hashFolderPicker = reactive({ open: false });
+    const hashFolderColumns = [
+      { key: 'position', label: '#', align: 'right', className: 'col-index' },
+      { key: 'path', label: 'Folder', className: 'mono' },
+      { key: 'remove', label: '', sortable: false, className: 'col-remove' },
+    ];
 
     loadSettings()
       .then((settings) => {
@@ -152,9 +165,70 @@ export default {
       await persistDataFolder('');
     };
 
+    const hashFolderRows = computed(() => {
+      const list = Array.isArray(store.settings.hashFolders) ? store.settings.hashFolders : [];
+      return list.map((path, position) => ({ position: position + 1, storeIndex: position, path }));
+    });
+
+    /**
+     * Save the next state of the hash folder list. Centralises the saving flag
+     * and error surface so the grid stays in sync with the store.
+     * @param {string[]} next
+     */
+    async function persistHashFolders(next) {
+      hashFolderError.value = '';
+      hashFolderSaving.value = true;
+      try {
+        await saveSettings({ hashFolders: next });
+        clearBanner();
+      } catch (err) {
+        hashFolderError.value = err.message;
+        fail(`Could not save the hash folder collection: ${err.message}`);
+      } finally {
+        hashFolderSaving.value = false;
+      }
+    }
+
+    /** Append the draft path to the collection, ignoring duplicates and blanks. */
+    const addHashFolder = async () => {
+      const candidate = hashFolderDraft.value.trim();
+      if (candidate === '') {
+        hashFolderError.value = 'Pick or type a folder before adding it.';
+        return;
+      }
+      const current = Array.isArray(store.settings.hashFolders) ? store.settings.hashFolders : [];
+      if (current.includes(candidate)) {
+        hashFolderError.value = 'That folder is already in the collection.';
+        return;
+      }
+      await persistHashFolders([...current, candidate]);
+      hashFolderDraft.value = '';
+    };
+
+    /** Drop the entry at the given zero-based index from the collection. */
+    const removeHashFolder = async (index) => {
+      const current = Array.isArray(store.settings.hashFolders) ? store.settings.hashFolders : [];
+      if (index < 0 || index >= current.length) return;
+      const next = current.filter((_, i) => i !== index);
+      await persistHashFolders(next);
+    };
+
+    /** Browse-modal result: fill the draft, do not add yet. */
+    const chooseHashFolder = (chosen) => {
+      hashFolderPicker.open = false;
+      hashFolderDraft.value = chosen;
+    };
+
+    const openHashFolderPicker = () => {
+      hashFolderError.value = '';
+      hashFolderPicker.open = true;
+    };
+
     return {
+      addHashFolder,
       chooseDataFolder,
       chooseFolder,
+      chooseHashFolder,
       clearAll,
       dataFolder,
       dataFolderDirty,
@@ -164,11 +238,19 @@ export default {
       errors,
       FIELDS,
       formatTime,
+      hashFolderColumns,
+      hashFolderDraft,
+      hashFolderError,
+      hashFolderPicker,
+      hashFolderRows,
+      hashFolderSaving,
       isDirty,
+      openHashFolderPicker,
       openPicker,
       persist,
       persistDataFolder,
       picker,
+      removeHashFolder,
       resetDataFolder,
       savedAt,
       saving,
@@ -275,6 +357,60 @@ export default {
         </div>
       </div>
 
+      <div class="setting-block">
+        <header class="setting-head">
+          <h2>Hash folder collection</h2>
+          <span class="badge" v-if="hashFolderRows.length === 0">empty</span>
+          <span class="badge" v-else>{{ hashFolderRows.length }} folder<span v-if="hashFolderRows.length !== 1">s</span></span>
+        </header>
+
+        <p class="setting-note">
+          A list of folders you want to hash often. Stored in
+          <span class="mono">{{ store.settings.file }}</span> as
+          <span class="mono">hashFolders</span>. No feature reads it yet - this
+          is the place to keep them so the rest of the app can.
+        </p>
+
+        <div class="setting-field">
+          <p class="hint">Type a folder path or pick one with Browse, then press Add to put it in the collection.</p>
+          <div class="toolbar">
+            <input
+              id="set-hash-folder"
+              v-model="hashFolderDraft"
+              class="path-input mono"
+              type="text"
+              placeholder="/home/you/projects"
+              :disabled="hashFolderSaving"
+              @keyup.enter="addHashFolder"
+            />
+            <button type="button" @click="openHashFolderPicker" :disabled="hashFolderSaving">Browse…</button>
+            <button type="button" class="primary" @click="addHashFolder" :disabled="hashFolderSaving || hashFolderDraft.trim() === ''">
+              Add to collection
+            </button>
+          </div>
+          <p v-if="hashFolderError" class="setting-error">{{ hashFolderError }}</p>
+        </div>
+
+        <DataTable
+          :columns="hashFolderColumns"
+          :rows="hashFolderRows"
+          row-key="path"
+          default-sort="position"
+          empty-text="No folders yet. Add one above to start the collection."
+        >
+          <template #cell-remove="{ row }">
+            <button
+              type="button"
+              class="icon"
+              :disabled="hashFolderSaving"
+              :title="'Remove ' + row.path"
+              :aria-label="'Remove ' + row.path"
+              @click="removeHashFolder(row.storeIndex)"
+            >✕</button>
+          </template>
+        </DataTable>
+      </div>
+
       <FolderPicker
         v-if="picker.open"
         :start-path="values[picker.field]"
@@ -287,6 +423,13 @@ export default {
         :start-path="dataFolder || store.dataFolder.resolved"
         @close="dataFolderPicker.open = false"
         @select="chooseDataFolder"
+      />
+
+      <FolderPicker
+        v-if="hashFolderPicker.open"
+        :start-path="hashFolderDraft || store.dataFolder.resolved"
+        @close="hashFolderPicker.open = false"
+        @select="chooseHashFolder"
       />
     </section>
   `,

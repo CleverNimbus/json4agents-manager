@@ -4,12 +4,13 @@
  */
 import { computed, reactive, ref, watch } from 'vue';
 import DataTable from './DataTable.js';
-import FolderPicker from './FolderPicker.js';
+import ExecutionPlanPanel from './ExecutionPlanPanel.js';
 import HashDetail from './HashDetail.js';
 import { formatBytes, formatDuration, formatTime, latestHash, shortHash } from '../format.js';
 import {
   cancelHash,
   loadHashes,
+  loadSettings,
   loadState,
   rebuildHashIndex,
   rememberHashFolder,
@@ -85,25 +86,43 @@ const runColumns = [
 
 export default {
   name: 'HashingTab',
-  components: { DataTable, FolderPicker, HashDetail },
+  components: { DataTable, ExecutionPlanPanel, HashDetail },
   setup() {
-    const path = ref(store.hashJob.root || '');
-    const includeHidden = ref(true);
+    /** Folder picked from the dropdown. Always one of `store.settings.hashFolders`. */
+    const selectedFolder = ref('');
+    const includeHidden = ref(false);
     const followSymlinks = ref(false);
     const view = ref('files');
     const filter = ref('');
     /** Show only the rows whose hash changed since the previous recorded one. */
     const changedOnly = ref(false);
-    const picker = reactive({ open: false });
     /** Row whose hash history is open, null when the popup is closed. */
     const detail = ref(null);
 
     if (!store.hashes.loaded) loadHashes().catch((err) => setBanner('error', err.message));
 
+    /**
+     * Pick the default selection from the collection: the in-flight or last
+     * run root wins when it is still in the list, then the remembered folder
+     * from state, then the first item. If the collection is empty the
+     * dropdown shows an empty-state message instead of a placeholder value.
+     */
+    const initialSelection = (folders) => {
+      if (folders.length === 0) return '';
+      const remembered = store.hashJob.root || store.state.hashTab.lastFolder || '';
+      if (remembered !== '' && folders.includes(remembered)) return remembered;
+      return folders[0];
+    };
+
+    if (!store.settings.loaded) {
+      loadSettings().catch((err) => setBanner('error', err.message));
+    }
     // Restore the folder used last time. An in-progress run always wins over
     // the stored value, so a reload during a hash does not lose the target.
-    loadState().then(({ hashTab }) => {
-      if (path.value.trim() === '') path.value = store.hashJob.root || hashTab.lastFolder || '';
+    loadState().then(() => {
+      if (selectedFolder.value === '') {
+        selectedFolder.value = initialSelection(store.settings.hashFolders);
+      }
     });
 
     const views = [
@@ -177,23 +196,10 @@ export default {
     };
 
     const run = () => {
-      const target = path.value.trim();
+      const target = selectedFolder.value.trim();
       if (target === '') return;
       rememberHashFolder(target);
       startHash({ path: target, includeHidden: includeHidden.value, followSymlinks: followSymlinks.value });
-    };
-
-    /** Choosing a folder in the picker is also "using" it. */
-    const chooseFolder = (chosen) => {
-      path.value = chosen;
-      picker.open = false;
-      rememberHashFolder(chosen);
-    };
-
-    /** Leaving the text box with a path in it counts as using that folder. */
-    const onPathBlur = () => {
-      const target = path.value.trim();
-      if (target !== '') rememberHashFolder(target);
     };
 
     /**
@@ -218,11 +224,29 @@ export default {
     };
 
     // A data folder change swaps state.json underneath us. Take the folder
-    // remembered there unless the user already typed or hashed something.
+    // remembered there unless the user already chose one.
     watch(
       () => store.revision,
       () => {
-        if (path.value.trim() === '') path.value = store.hashJob.root || store.state.hashTab.lastFolder || '';
+        if (selectedFolder.value === '') {
+          selectedFolder.value = initialSelection(store.settings.hashFolders);
+        }
+      },
+    );
+
+    // The user may add or remove folders in Settings while this tab is open.
+    // Keep the selection valid: if the picked folder disappeared, fall back
+    // to the remembered folder or the first item.
+    watch(
+      () => store.settings.hashFolders,
+      (folders) => {
+        if (folders.length === 0) {
+          selectedFolder.value = '';
+          return;
+        }
+        if (!folders.includes(selectedFolder.value)) {
+          selectedFolder.value = initialSelection(folders);
+        }
       },
     );
 
@@ -230,7 +254,6 @@ export default {
       cancelHash,
       changedCount,
       changedOnly,
-      chooseFolder,
       clickable,
       columns,
       detail,
@@ -238,14 +261,13 @@ export default {
       emptyText,
       filter,
       followSymlinks,
+      hashFolders: computed(() => store.settings.hashFolders),
       includeHidden,
-      onPathBlur,
       openDetail,
-      path,
-      picker,
       rebuildIndex,
       rowKey,
       run,
+      selectedFolder,
       showChangedToggle,
       store,
       toggleChangedOnly,
@@ -257,24 +279,33 @@ export default {
   template: `
     <section class="panel">
       <div class="toolbar">
-        <label class="field-label" for="hash-path">Folder</label>
-        <input
-          id="hash-path"
-          v-model="path"
-          class="path-input mono"
-          type="text"
-          placeholder="/home/you/projects"
-          @keyup.enter="run"
-          @blur="onPathBlur"
+        <label class="field-label" for="hash-folder">Folder</label>
+        <select
+          v-if="hashFolders.length > 0"
+          id="hash-folder"
+          v-model="selectedFolder"
+          class="agent-select"
           :disabled="store.hashJob.running"
-        />
-        <button type="button" @click="picker.open = true" :disabled="store.hashJob.running">Explore…</button>
-        <button v-if="!store.hashJob.running" type="button" class="primary" @click="run" :disabled="path.trim() === ''">
+        >
+          <option v-for="folder in hashFolders" :key="folder" :value="folder" class="mono">
+            {{ folder }}
+          </option>
+        </select>
+        <span v-else class="hash-folder-empty">
+          No folders yet — add them in <strong>Settings → Hash folder collection</strong>.
+        </span>
+        <button
+          v-if="!store.hashJob.running"
+          type="button"
+          class="primary"
+          @click="run"
+          :disabled="selectedFolder === ''"
+        >
           Hash folder
         </button>
         <button v-else type="button" class="danger" @click="cancelHash">Cancel</button>
         <label class="check">
-          <input type="checkbox" v-model="includeHidden" :disabled="store.hashJob.running" /> hidden
+          <input type="checkbox" v-model="includeHidden" :disabled="store.hashJob.running" /> Include hidden
         </label>
         <label class="check">
           <input type="checkbox" v-model="followSymlinks" :disabled="store.hashJob.running" /> follow symlinks
@@ -283,71 +314,71 @@ export default {
 
       <p class="progress" :class="store.hashJob.phase">{{ store.hashJob.progressText }}</p>
 
-      <div class="toolbar">
-        <div class="segmented">
-          <button
-            v-for="entry in views"
-            :key="entry.id"
-            type="button"
-            :class="{ active: view === entry.id }"
-            @click="view = entry.id"
-          >{{ entry.label }}</button>
+      <div class="hashing-split">
+        <aside class="hashing-left">
+          <ExecutionPlanPanel />
+        </aside>
+        <div class="hashing-right">
+          <div class="toolbar">
+            <div class="segmented">
+              <button
+                v-for="entry in views"
+                :key="entry.id"
+                type="button"
+                :class="{ active: view === entry.id }"
+                @click="view = entry.id"
+              >{{ entry.label }}</button>
+            </div>
+            <input v-model="filter" class="filter" type="search" placeholder="Filter by path …" />
+            <button
+              v-if="showChangedToggle"
+              type="button"
+              class="badge toggle"
+              :class="{ active: changedOnly }"
+              :aria-pressed="changedOnly"
+              :title="changedOnly ? 'Showing changed files only — click to show all' : 'Click to hide unchanged files'"
+              @click="toggleChangedOnly"
+            >
+              ● {{ changedCount }} changed
+            </button>
+            <span
+              v-if="store.hashes.doc.broken.length > 0"
+              class="badge"
+              :title="store.hashes.doc.broken.map((b) => b.file + ': ' + b.message).join('\\n')"
+              >{{ store.hashes.doc.broken.length }} unreadable run file{{ store.hashes.doc.broken.length === 1 ? '' : 's' }}</span
+            >
+            <span class="spacer"></span>
+            <button
+              type="button"
+              :disabled="store.hashes.rebuilding || store.hashJob.running"
+              title="Throw the derived index away and rebuild it from the run files. Run files are never modified."
+              @click="rebuildIndex"
+            >
+              {{ store.hashes.rebuilding ? 'Rebuilding…' : 'Rebuild index' }}
+            </button>
+            <span class="badge">{{ visibleRows.length }} rows</span>
+            <span class="badge" :title="store.hashes.file">{{ store.hashes.file }}</span>
+          </div>
+
+          <DataTable
+            :columns="columns"
+            :rows="visibleRows"
+            :row-key="rowKey"
+            default-sort="path"
+            :empty-text="emptyText"
+            :clickable="clickable"
+            @row-click="openDetail"
+          >
+            <template #cell-mark="{ row }">
+              <span
+                v-if="row.changed"
+                class="dot-changed"
+                title="The hash changed since the previous recorded hash"
+              ></span>
+            </template>
+          </DataTable>
         </div>
-        <input v-model="filter" class="filter" type="search" placeholder="Filter by path …" />
-        <button
-          v-if="showChangedToggle"
-          type="button"
-          class="badge toggle"
-          :class="{ active: changedOnly }"
-          :aria-pressed="changedOnly"
-          :title="changedOnly ? 'Showing changed files only — click to show all' : 'Click to hide unchanged files'"
-          @click="toggleChangedOnly"
-        >
-          ● {{ changedCount }} changed
-        </button>
-        <span
-          v-if="store.hashes.doc.broken.length > 0"
-          class="badge"
-          :title="store.hashes.doc.broken.map((b) => b.file + ': ' + b.message).join('\n')"
-          >{{ store.hashes.doc.broken.length }} unreadable run file{{ store.hashes.doc.broken.length === 1 ? '' : 's' }}</span
-        >
-        <span class="spacer"></span>
-        <button
-          type="button"
-          :disabled="store.hashes.rebuilding || store.hashJob.running"
-          title="Throw the derived index away and rebuild it from the run files. Run files are never modified."
-          @click="rebuildIndex"
-        >
-          {{ store.hashes.rebuilding ? 'Rebuilding…' : 'Rebuild index' }}
-        </button>
-        <span class="badge">{{ visibleRows.length }} rows</span>
-        <span class="badge" :title="store.hashes.file">{{ store.hashes.file }}</span>
       </div>
-
-      <DataTable
-        :columns="columns"
-        :rows="visibleRows"
-        :row-key="rowKey"
-        default-sort="path"
-        :empty-text="emptyText"
-        :clickable="clickable"
-        @row-click="openDetail"
-      >
-        <template #cell-mark="{ row }">
-          <span
-            v-if="row.changed"
-            class="dot-changed"
-            title="The hash changed since the previous recorded hash"
-          ></span>
-        </template>
-      </DataTable>
-
-      <FolderPicker
-        v-if="picker.open"
-        :start-path="path"
-        @close="picker.open = false"
-        @select="chooseFolder"
-      />
 
       <HashDetail v-if="detail" :entry="detail" :kind="detailKind" @close="detail = null" />
     </section>

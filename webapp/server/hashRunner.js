@@ -157,7 +157,7 @@ async function scanTree(root, { includeHidden, followSymlinks }, signal) {
  * @param {(event: object) => void} options.onEvent progress callback
  * @param {AbortSignal} [options.signal]
  */
-export async function hashFolder(root, { includeHidden = true, followSymlinks = false } = {}, onEvent = () => {}, signal) {
+export async function hashFolder(root, { includeHidden = false, followSymlinks = false } = {}, onEvent = () => {}, signal) {
   const startedAt = new Date();
   onEvent({ type: 'scan', root, startedAt: startedAt.toISOString() });
 

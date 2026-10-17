@@ -23,6 +23,22 @@ export function expandPath(input) {
 }
 
 /**
+ * Wrap an fs error thrown while reading a folder into the JSON shape the API
+ * reports: a specific status and a message that does not leak the raw node
+ * error string. `ENOENT` is a 404, permission problems are 403, anything else
+ * is a 400 - the caller gave us a path we cannot use, not a server fault.
+ */
+function readError(err, abs) {
+  const code = err?.code;
+  const denied = code === 'EACCES' || code === 'EPERM';
+  const message = code === 'ENOENT' ? `No such folder: ${abs}` : denied ? `No permission to read: ${abs}` : `Cannot read ${abs}: ${err.message}`;
+  const status = code === 'ENOENT' ? 404 : denied ? 403 : 400;
+  const wrapped = new Error(message);
+  wrapped.status = status;
+  return wrapped;
+}
+
+/**
  * Resolve a user supplied path and make sure it is inside the configured root
  * jail (when there is one).
  *
@@ -41,11 +57,7 @@ export async function resolveBrowsable(input, { mustBeDirectory = true } = {}) {
   try {
     stats = await fs.stat(abs);
   } catch (err) {
-    const wrapped = new Error(
-      err.code === 'ENOENT' ? `No such folder: ${abs}` : `Cannot read ${abs}: ${err.message}`,
-    );
-    wrapped.status = err.code === 'ENOENT' ? 404 : 400;
-    throw wrapped;
+    throw readError(err, abs);
   }
   if (mustBeDirectory && !stats.isDirectory()) {
     const err = new Error(`Not a folder: ${abs}`);
@@ -71,7 +83,12 @@ export function parentOf(abs) {
 
 fsRouter.get('/api/fs', async (req, res) => {
   const abs = await resolveBrowsable(req.query.path);
-  const dirents = await fs.readdir(abs, { withFileTypes: true });
+  let dirents;
+  try {
+    dirents = await fs.readdir(abs, { withFileTypes: true });
+  } catch (err) {
+    throw readError(err, abs);
+  }
   const entries = [];
 
   for (const dirent of dirents) {

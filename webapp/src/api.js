@@ -37,6 +37,27 @@ export const getSchema = () => request('/api/schema');
 
 export const getHashes = () => request('/api/hashes');
 
+/** Computed producer -> consumer graph for the Agent Dependencies tab. */
+export const getDependencies = () => request('/api/agent-dependencies');
+
+/** Saved execution plan for the Hashing tab; empty shape when none exists. */
+export const getExecutionPlan = () => request('/api/execution-plan');
+
+/** Recompute the plan from the current hashes + agents and persist it. */
+export const generateExecutionPlan = () =>
+  request('/api/execution-plan/generate', { method: 'POST' });
+
+/**
+ * Toggle the `done` flag on one or more steps. Body:
+ *   { steps: [{ code: 'AG-001', done: true }, …] }
+ */
+export const patchExecutionPlan = (patch) =>
+  request('/api/execution-plan', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+
 /** Discard the derived index and rebuild it from the run files. */
 export const rebuildHashIndex = () => request('/api/hashes/rebuild', { method: 'POST' });
 

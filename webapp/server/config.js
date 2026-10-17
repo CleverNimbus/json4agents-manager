@@ -178,4 +178,8 @@ export const files = {
   get settings() {
     return path.join(config.dataDir, 'settings.json');
   },
+  /** Execution plan for the Hashing tab. User-authored, never committed. */
+  get executionPlan() {
+    return path.join(config.dataDir, 'execution-plan.json');
+  },
 };

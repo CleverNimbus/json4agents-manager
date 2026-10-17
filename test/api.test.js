@@ -15,7 +15,7 @@ import { request as httpRequest } from 'node:http';
 import path from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
 
-import { agent, buildTree, listNames, startApp, streamHash, tempDir, useDataFolder, write } from './helpers.js';
+import { agent, buildTree, listNames, readJson, startApp, streamHash, tempDir, useDataFolder, write } from './helpers.js';
 
 let api;
 let dir;
@@ -74,6 +74,133 @@ describe('GET /api/schema', () => {
     assert.equal(status, 200);
     assert.equal(body.$schema, 'https://json-schema.org/draft/2020-12/schema');
     assert.ok(body.$defs.agent, 'the form needs $defs/agent');
+  });
+});
+
+describe('GET /api/agent-dependencies', () => {
+  it('returns every agent as a node and links the producers to the consumers', async () => {
+    await api.post('/api/agents', {
+      agent: agent('AG-001', { source_dependant_files: ['config/root.json'], result_generated_files: ['out/root.md'] }),
+    });
+    await api.post('/api/agents', {
+      agent: agent('AG-002', { source_dependant_files: ['out/*'], result_generated_files: [] }),
+    });
+
+    const { status, body } = await api.get('/api/agent-dependencies');
+    assert.equal(status, 200);
+    assert.deepEqual(body.agents.map((n) => n.code), ['AG-001', 'AG-002']);
+    assert.equal(body.edges.length, 1);
+    assert.equal(body.edges[0].from, 'AG-001');
+    assert.equal(body.edges[0].to, 'AG-002');
+    assert.deepEqual(body.edges[0].via, [{ output: 'out/root.md', input: 'out/*' }]);
+  });
+
+  it('reports an empty graph when there are no agents', async () => {
+    const { status, body } = await api.get('/api/agent-dependencies');
+    assert.equal(status, 200);
+    assert.deepEqual(body.agents, []);
+    assert.deepEqual(body.edges, []);
+  });
+});
+
+describe('execution-plan endpoints', () => {
+  /**
+   * Set up the bits the planner needs: one agent with a known output, and a
+   * pair of synthetic hash runs that report that file as changed. Returns
+   * nothing - the side effect is what matters.
+   */
+  const setupChangedRun = async () => {
+    const runsDir = path.join(dir, 'hashes', 'runs');
+    await fs.mkdir(runsDir, { recursive: true });
+    await fs.writeFile(
+      path.join(runsDir, '2026-01-01T00-00-00Z.json'),
+      JSON.stringify({
+        id: '2026-01-01T00-00-00Z',
+        root: '/x', host: 'test',
+        startedAt: '2026-01-01T00:00:00Z', finishedAt: '2026-01-01T00:00:00Z',
+        durationMs: 1, stats: { files: 1, changed: 0, bytes: 0, errors: 0 },
+        files: [{ path: 'out/root.md', hash: 'h1' }], folders: [],
+      }),
+    );
+    await fs.writeFile(
+      path.join(runsDir, '2026-01-01T00-05-00Z.json'),
+      JSON.stringify({
+        id: '2026-01-01T00-05-00Z',
+        root: '/x', host: 'test',
+        startedAt: '2026-01-01T00:05:00Z', finishedAt: '2026-01-01T00:05:00Z',
+        durationMs: 1, stats: { files: 1, changed: 1, bytes: 0, errors: 0 },
+        files: [{ path: 'out/root.md', hash: 'h2' }], folders: [],
+      }),
+    );
+    await api.post('/api/hashes/rebuild-index', {});
+  };
+
+  beforeEach(async () => {
+    await api.post('/api/agents', {
+      agent: agent('AG-001', {
+        source_dependant_files: ['config/root.json'],
+        result_generated_files: ['out/root.md'],
+      }),
+    });
+  });
+
+  it('GET returns the empty plan when nothing is saved yet', async () => {
+    const { status, body } = await api.get('/api/execution-plan');
+    assert.equal(status, 200);
+    assert.deepEqual(body.changedPaths, []);
+    assert.deepEqual(body.steps, []);
+  });
+
+  it('POST /generate writes the plan to data/execution-plan.json', async () => {
+    await setupChangedRun();
+
+    const generated = await api.post('/api/execution-plan/generate', {});
+    assert.equal(generated.status, 200);
+    assert.equal(generated.body.steps.length, 1);
+    assert.equal(generated.body.steps[0].code, 'AG-001');
+    assert.equal(generated.body.steps[0].done, false);
+    assert.deepEqual(generated.body.changedPaths, ['out/root.md']);
+    assert.ok(typeof generated.body.generatedAt === 'string' && generated.body.generatedAt !== '');
+
+    const onDisk = JSON.parse(await fs.readFile(path.join(dir, 'execution-plan.json'), 'utf8'));
+    assert.deepEqual(onDisk.changedPaths, generated.body.changedPaths);
+    assert.equal(onDisk.steps.length, 1);
+  });
+
+  it('GET after generate returns the saved plan', async () => {
+    await setupChangedRun();
+    await api.post('/api/execution-plan/generate', {});
+    const { body } = await api.get('/api/execution-plan');
+    assert.equal(body.steps.length, 1);
+    assert.equal(body.steps[0].code, 'AG-001');
+  });
+
+  it('PATCH toggles the done flag of a step and persists it', async () => {
+    await setupChangedRun();
+    await api.post('/api/execution-plan/generate', {});
+    const patched = await api.request('PATCH', '/api/execution-plan', {
+      steps: [{ code: 'AG-001', done: true }],
+    });
+    assert.equal(patched.status, 200);
+    assert.equal(patched.body.steps[0].done, true);
+
+    const onDisk = JSON.parse(await fs.readFile(path.join(dir, 'execution-plan.json'), 'utf8'));
+    assert.equal(onDisk.steps[0].done, true);
+  });
+
+  it('PATCH rejects a body that is not { steps: [...] }', async () => {
+    const r = await api.request('PATCH', '/api/execution-plan', {});
+    assert.equal(r.status, 400);
+  });
+
+  it('PATCH ignores codes that are not in the plan', async () => {
+    await setupChangedRun();
+    await api.post('/api/execution-plan/generate', {});
+    const r = await api.request('PATCH', '/api/execution-plan', {
+      steps: [{ code: 'AG-MISSING', done: true }],
+    });
+    assert.equal(r.status, 200);
+    for (const step of r.body.steps) assert.equal(step.done, false);
   });
 });
 
@@ -173,28 +300,62 @@ describe('POST /api/agents/:code/link-files', () => {
     await api.post('/api/agents', { agent: agent('AG-001') });
   });
 
-  it('adds the paths to result_generated_files and reports what was new', async () => {
+  it('saves the parent folders of the changed files, suffixed with "/*"', async () => {
     const { status, body } = await api.post('/api/agents/AG-001/link-files', {
-      paths: ['src/a.js', 'src/b.js'],
+      paths: ['src/a.js', 'docs/readme.md'],
     });
     assert.equal(status, 200);
-    assert.deepEqual(body.added, ['src/a.js', 'src/b.js']);
+    assert.deepEqual(body.added, ['src/*', 'docs/*']);
     assert.equal(body.alreadyPresent, 0);
-    assert.deepEqual(body.agent.result_generated_files, ['src/a.js', 'src/b.js']);
+    assert.deepEqual(body.agent.result_generated_files, ['src/*', 'docs/*']);
+
+    const onDisk = JSON.parse(await fs.readFile(path.join(agentsDir(), 'AG-001.json'), 'utf8'));
+    assert.deepEqual(onDisk.result_generated_files, ['src/*', 'docs/*'], 'the JSON file on disk holds the folder references');
   });
 
-  it('skips paths that are already listed', async () => {
+  it('collapses several files in the same folder into a single "folder/*" entry', async () => {
+    const { body } = await api.post('/api/agents/AG-001/link-files', {
+      paths: ['src/a.js', 'src/b.js'],
+    });
+
+    assert.deepEqual(body.added, ['src/*'], 'one entry per immediate folder, regardless of file count');
+    assert.deepEqual(body.agent.result_generated_files, ['src/*']);
+  });
+
+  it('keeps different immediate folders as separate entries, even when nested', async () => {
+    const { body } = await api.post('/api/agents/AG-001/link-files', {
+      paths: ['src/a.js', 'src/sub/c.js'],
+    });
+
+    assert.deepEqual(body.added, ['src/*', 'src/sub/*'], 'a sub-folder is not covered by its parent');
+    assert.deepEqual(body.agent.result_generated_files, ['src/*', 'src/sub/*']);
+  });
+
+  it('records a file at the git root as "./*"', async () => {
+    const { body } = await api.post('/api/agents/AG-001/link-files', { paths: ['README.md'] });
+
+    assert.deepEqual(body.added, ['./*']);
+    assert.deepEqual(body.agent.result_generated_files, ['./*']);
+  });
+
+  it('skips folder entries that are already listed', async () => {
     await api.post('/api/agents/AG-001/link-files', { paths: ['src/a.js'] });
-    const { body } = await api.post('/api/agents/AG-001/link-files', { paths: ['src/a.js', 'src/c.js'] });
+    const { body } = await api.post('/api/agents/AG-001/link-files', {
+      paths: ['src/a.js', 'src/c.js', 'docs/r.md'],
+    });
 
-    assert.deepEqual(body.added, ['src/c.js']);
-    assert.equal(body.alreadyPresent, 1);
-    assert.deepEqual(body.agent.result_generated_files, ['src/a.js', 'src/c.js'], 'no duplicate entry');
+    assert.deepEqual(body.added, ['docs/*'], 'src/* was already there');
+    assert.equal(body.alreadyPresent, 1, 'one distinct folder entry was already present');
+    assert.deepEqual(body.agent.result_generated_files, ['src/*', 'docs/*']);
   });
 
-  it('keeps paths in the order they were given', async () => {
-    const { body } = await api.post('/api/agents/AG-001/link-files', { paths: ['z.js', 'a.js'] });
-    assert.deepEqual(body.agent.result_generated_files, ['z.js', 'a.js']);
+  it('keeps folder entries in the order their files were first seen', async () => {
+    const { body } = await api.post('/api/agents/AG-001/link-files', {
+      paths: ['docs/z.js', 'src/a.js'],
+    });
+
+    assert.deepEqual(body.added, ['docs/*', 'src/*']);
+    assert.deepEqual(body.agent.result_generated_files, ['docs/*', 'src/*']);
   });
 
   it('refuses a path that is absolute or escapes the git root', async () => {
@@ -404,6 +565,111 @@ describe('GET and PUT /api/state', () => {
     const { status } = await api.put('/api/state', {});
     assert.equal(status, 200);
     assert.equal(await lastFolder(), '/home/you/projects');
+  });
+});
+
+describe('GET and PUT /api/settings', () => {
+  const getCollection = async () => (await api.get('/api/settings')).body.settings.hashFolders;
+
+  it('starts with an empty hash folder collection', async () => {
+    assert.deepEqual(await getCollection(), []);
+  });
+
+  it('saves a hash folder collection and returns the trimmed list', async () => {
+    const { status, body } = await api.put('/api/settings', { hashFolders: ['  /tmp/a  ', '/tmp/b'] });
+    assert.equal(status, 200);
+    assert.deepEqual(body.settings.hashFolders, ['/tmp/a', '/tmp/b']);
+    assert.deepEqual(await getCollection(), ['/tmp/a', '/tmp/b']);
+  });
+
+  it('replaces the collection wholesale when the patch lists fewer entries', async () => {
+    await api.put('/api/settings', { hashFolders: ['/tmp/a', '/tmp/b'] });
+    const { body } = await api.put('/api/settings', { hashFolders: ['/tmp/c'] });
+    assert.deepEqual(body.settings.hashFolders, ['/tmp/c']);
+    assert.deepEqual(await getCollection(), ['/tmp/c']);
+  });
+
+  it('refuses a non-array hashFolders patch and leaves the file alone', async () => {
+    await api.put('/api/settings', { hashFolders: ['/tmp/keep'] });
+    for (const patch of [{ hashFolders: 'nope' }, { hashFolders: { 0: '/tmp/x' } }, { hashFolders: [1, 2, 3] }]) {
+      const { status } = await api.put('/api/settings', patch);
+      assert.equal(status, 400, `expected ${JSON.stringify(patch)} to be refused`);
+    }
+    assert.deepEqual(await getCollection(), ['/tmp/keep']);
+  });
+
+  it('strips nullish entries and trims the rest before persisting', async () => {
+    const { status, body } = await api.put('/api/settings', { hashFolders: ['/tmp/a', null, '  /tmp/b  ', undefined] });
+    assert.equal(status, 200);
+    assert.deepEqual(body.settings.hashFolders, ['/tmp/a', '/tmp/b']);
+  });
+
+  it('writes to data/settings.json on disk', async () => {
+    await api.put('/api/settings', { hashFolders: ['/tmp/disk'] });
+    const onDisk = await readJson(path.join(dir, 'settings.json'));
+    assert.deepEqual(onDisk.hashFolders, ['/tmp/disk']);
+  });
+});
+
+describe('GET /api/fs', () => {
+  it('lists a folder: directories first, then files with size and hidden flag', async () => {
+    const tree = await buildTree(await tempDir('fs'), {
+      'a.txt': 'hello',
+      'sub/inner.txt': 'x',
+      '.hidden': 'secret',
+    });
+
+    const { status, body } = await api.get(`/api/fs?path=${encodeURIComponent(tree)}`);
+    assert.equal(status, 200);
+    assert.equal(body.path, tree);
+    assert.equal(body.parent, path.dirname(tree));
+    assert.deepEqual(
+      body.entries.map((entry) => entry.name),
+      ['sub', '.hidden', 'a.txt'],
+      'directories before files, then by name',
+    );
+
+    const sub = body.entries.find((entry) => entry.name === 'sub');
+    assert.equal(sub.kind, 'directory');
+    const hidden = body.entries.find((entry) => entry.name === '.hidden');
+    assert.equal(hidden.kind, 'file');
+    assert.equal(hidden.hidden, true);
+    assert.equal(hidden.size, 'secret'.length);
+    const file = body.entries.find((entry) => entry.name === 'a.txt');
+    assert.equal(file.hidden, false);
+    assert.equal(file.size, 'hello'.length);
+  });
+
+  it('falls back to the home folder when no path is given', async () => {
+    const { status, body } = await api.get('/api/fs');
+    assert.equal(status, 200);
+    assert.equal(body.path, body.home, 'an empty path means the home folder');
+    assert.ok(Array.isArray(body.entries));
+  });
+
+  it('answers 404 for a folder that does not exist', async () => {
+    const { status, body } = await api.get(`/api/fs?path=${encodeURIComponent('/tmp/definitely-not-here-42')}`);
+    assert.equal(status, 404);
+    assert.match(body.error, /No such folder/);
+  });
+
+  it('answers 400 for a path that is not a folder', async () => {
+    const tree = await buildTree(await tempDir('fs-file'), { 'a.txt': 'x' });
+    const { status, body } = await api.get(`/api/fs?path=${encodeURIComponent(path.join(tree, 'a.txt'))}`);
+    assert.equal(status, 400);
+    assert.match(body.error, /Not a folder/);
+  });
+
+  it('answers 403, not 500, for a folder it cannot read', async () => {
+    const locked = await tempDir('fs-locked');
+    await fs.chmod(locked, 0o000);
+    try {
+      const { status, body } = await api.get(`/api/fs?path=${encodeURIComponent(locked)}`);
+      assert.equal(status, 403, 'a permission error is a 403, never a bare 500');
+      assert.match(body.error, /No permission to read/);
+    } finally {
+      await fs.chmod(locked, 0o700);
+    }
   });
 });
 

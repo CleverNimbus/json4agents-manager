@@ -154,6 +154,7 @@ vite.config.ts.timestamp-*
 # Machine specific local state and settings - not worth versioning.
 data/state.json
 data/settings.json
+data/execution-plan.json
 data-location.json
 
 # Hash store.

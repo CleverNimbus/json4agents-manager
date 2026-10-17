@@ -22,6 +22,8 @@ import { appDir, config, files } from './server/config.js';
 import { agentsRouter } from './server/agentsApi.js';
 import { changesRouter } from './server/changesApi.js';
 import { dataFolderRouter } from './server/dataFolderApi.js';
+import { dependenciesRouter } from './server/dependenciesApi.js';
+import { executionPlanRouter } from './server/executionPlanApi.js';
 import { fsRouter } from './server/fsApi.js';
 import { hashRouter } from './server/hashApi.js';
 import { migrateLegacyHashes } from './server/hashesStore.js';
@@ -72,6 +74,13 @@ export function createApp({ host = config.host } = {}) {
   // build step - index.html maps the bare specifier "vue" to this URL.
   app.get('/vendor/vue.esm-browser.prod.js', (req, res) => res.sendFile(vueFile));
 
+  // Mermaid is shipped as a split ESM bundle: a core entry that imports
+  // diagram chunks from a sibling `chunks/` folder. The importmap maps the
+  // bare specifier "mermaid" to the core URL; serving the whole dist folder
+  // makes the relative chunk imports resolve without a second route.
+  const mermaidDir = path.join(appDir, '..', 'node_modules', 'mermaid', 'dist');
+  app.use('/vendor/mermaid', express.static(mermaidDir));
+
   app.get('/', (req, res) => res.sendFile(path.join(appDir, 'index.html')));
   app.get('/styles.css', (req, res) => res.sendFile(path.join(appDir, 'styles.css')));
   app.use('/src', express.static(path.join(appDir, 'src')));
@@ -79,6 +88,8 @@ export function createApp({ host = config.host } = {}) {
   app.use(agentsRouter);
   app.use(changesRouter);
   app.use(dataFolderRouter);
+  app.use(dependenciesRouter);
+  app.use(executionPlanRouter);
   app.use(fsRouter);
   app.use(hashRouter);
   app.use(stateRouter);

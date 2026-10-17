@@ -666,6 +666,25 @@ table.grid td.col-select {
   text-align: center;
 }
 
+table.grid th.col-index,
+table.grid td.col-index {
+  width: 44px;
+  min-width: 44px;
+  max-width: 44px;
+  text-align: right;
+  color: var(--text-faint);
+  padding-right: 12px;
+}
+
+table.grid th.col-remove,
+table.grid td.col-remove {
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  text-align: center;
+  padding: 0 4px;
+}
+
 .row-check {
   accent-color: var(--accent);
   width: 14px;
@@ -714,6 +733,22 @@ table.grid td.col-select {
 
 .link-note .mono {
   color: var(--text-dim);
+}
+
+.hash-folder-empty {
+  flex: 1;
+  min-width: 280px;
+  padding: 6px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  background: var(--bg-sunken);
+  color: var(--text-faint);
+  font-size: 12.5px;
+}
+
+.hash-folder-empty strong {
+  color: var(--text);
+  font-weight: 550;
 }
 
 /* ------------------------------------------------------------- settings */
@@ -966,4 +1001,135 @@ table.grid td.col-select {
 .picker-hint {
   font-size: 12px;
   color: var(--text-faint);
+}
+/* The Agent Dependencies tab draws a Mermaid flowchart. The SVG can be wide,
+   so the container scrolls instead of stretching the panel. */
+.dependency-graph {
+  display: flex;
+  justify-content: center;
+  padding: 16px 0;
+  overflow: auto;
+}
+.dependency-graph svg {
+  max-width: none;
+}
+
+/* The Hashing tab splits into a 33% left rail (execution plan) and a 67%
+   right column (the existing view selector + data table). The path toolbar
+   stays full width above the split. */
+.hashing-split {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+}
+.hashing-left {
+  flex: 1 1 33%;
+  min-width: 220px;
+  max-width: 33%;
+}
+.hashing-right {
+  flex: 2 1 67%;
+  min-width: 0;
+}
+
+.execution-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--panel-bg, rgba(255, 255, 255, 0.02));
+  height: 100%;
+  box-sizing: border-box;
+}
+.execution-plan-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+.execution-plan-subtitle {
+  margin: 0;
+  color: var(--text-faint, #888);
+  font-size: 12px;
+}
+.execution-plan-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.execution-plan-step {
+  position: relative;
+  padding: 8px 0;
+}
+.execution-plan-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.execution-plan-num {
+  font-weight: 700;
+  min-width: 24px;
+}
+.execution-plan-code {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-weight: 600;
+}
+.execution-plan-name {
+  color: var(--text-faint, #888);
+}
+.execution-plan-phase {
+  margin-left: auto;
+}
+.execution-plan-triggers {
+  list-style: disc;
+  padding-left: 28px;
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-faint, #888);
+}
+.execution-plan-triggers code {
+  font-size: 12px;
+}
+.execution-plan-arrow {
+  text-align: center;
+  color: var(--text-faint, #888);
+  font-size: 18px;
+  line-height: 1;
+  margin: 4px 0;
+}
+
+.execution-plan-step.is-done .execution-plan-code,
+.execution-plan-step.is-done .execution-plan-name {
+  text-decoration: line-through;
+  color: var(--text-faint, #888);
+}
+.execution-plan-step-head {
+  cursor: pointer;
+}
+.execution-plan-done {
+  margin: 0 4px 0 0;
+}
+.execution-plan-outdated {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--warning-border, #b07a00);
+  border-radius: 6px;
+  background: var(--warning-bg, rgba(176, 122, 0, 0.15));
+  font-size: 12px;
+  color: var(--warning-text, #f0c674);
+}
+.execution-plan-outdated-tag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--warning-tag-bg, #b07a00);
+  color: #1a1a1a;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.05em;
 }
