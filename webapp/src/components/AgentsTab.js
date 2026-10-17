@@ -5,7 +5,7 @@
 import { computed, reactive, ref } from 'vue';
 import AgentModal from './AgentModal.js';
 import DataTable from './DataTable.js';
-import { countOf, formatTime, lastOf, summariseList } from '../format.js';
+import { countOf, summariseList } from '../format.js';
 import { loadAgents, loadSchema, removeAgent, saveAgent, setBanner, store } from '../store.js';
 
 const columns = [
@@ -28,14 +28,6 @@ const columns = [
     value: (row) => countOf(row.result_generated_files),
     text: (row) => summariseList(row.result_generated_files),
     title: (row) => (row.result_generated_files ?? []).join('\n'),
-  },
-  {
-    key: 'executions',
-    label: 'Executions',
-    value: (row) => countOf(row.executions),
-    text: (row) =>
-      countOf(row.executions) === 0 ? '—' : countOf(row.executions) + ' · last ' + formatTime(lastOf(row.executions)),
-    title: (row) => (row.executions ?? []).join('\n'),
   },
   { key: 'actions', label: 'Actions', sortable: false, text: () => '', className: 'col-actions' },
 ];

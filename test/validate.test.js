@@ -47,7 +47,6 @@ describe('validateAgentRecord', () => {
       parent: 'AG-000',
       source_dependant_files: ['src/a.js'],
       result_generated_files: ['out/b.txt'],
-      executions: ['2026-10-16T19:04:31.469Z'],
     });
     assert.equal((await validateAgentRecord(full)).valid, true);
   });
@@ -63,12 +62,6 @@ describe('validateAgentRecord', () => {
     const { valid, errors } = await validateAgentRecord(agent('AG-001', { phase: 'one' }));
     assert.equal(valid, false);
     assert.ok(errors.some((e) => e.path === '/phase'));
-  });
-
-  it('rejects an execution that is not a date-time', async () => {
-    const { valid, errors } = await validateAgentRecord(agent('AG-001', { executions: ['last tuesday'] }));
-    assert.equal(valid, false, 'format: date-time must be enforced, not ignored');
-    assert.ok(errors.some((e) => e.path === '/executions/0'));
   });
 
   it('rejects a field the schema does not know', async () => {
@@ -89,19 +82,6 @@ describe('validateAgentRecord', () => {
     }
   });
 
-  it('reports every invalid execution when several are present', async () => {
-    const record = agent('AG-001', {
-      executions: ['2026-10-16T19:04:31.469Z', 'not-a-date', '2026-11-01T00:00:00.000Z', 'also-bad'],
-    });
-    const { valid, errors } = await validateAgentRecord(record);
-    assert.equal(valid, false);
-    // Each invalid execution is reported at its index, not merged.
-    assert.ok(errors.some((e) => e.path === '/executions/1'), 'index 1 is invalid');
-    assert.ok(errors.some((e) => e.path === '/executions/3'), 'index 3 is invalid');
-    // Valid executions must NOT be flagged.
-    assert.ok(!errors.some((e) => e.path === '/executions/0'));
-    assert.ok(!errors.some((e) => e.path === '/executions/2'));
-  });
 });
 
 describe('validateAgentCollection', () => {

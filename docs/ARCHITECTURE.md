@@ -8,13 +8,16 @@ changes described in the last section.
 
 ## 1. What this project is
 
-A local, single-user web app for managing two kinds of data on the developer's
+A local, single-user web app for managing three kinds of data on the developer's
 own machine:
 
 1. **Agent records** - one JSON file per agent in `data/agents/`, validated
    against a JSON Schema.
 2. **Hash history** - SHA-256 hashes of files and folders, kept in
    `data/hashes/runs/`, used to see what changed since the last run.
+3. **Execution receipts** - one immutable file per published run in
+   `data/executions/`, committed to git, so a teammate can see which work is
+   already done without running the agent again.
 
 The Node server owns all file access. The browser is a pure view: it never asks
 for filesystem permissions and works in any current browser. The previous
@@ -33,7 +36,7 @@ node --version   # v22 or newer
 npm install     # 94 packages, no build step
 npm start       # http://127.0.0.1:8000
 npm run dev     # same with node --watch
-npm test        # 235 tests, node:test only, no extra dependency
+npm test        # 365 tests, node:test only, no extra dependency
 npm run doctor  # read only integrity checks, exit 1 if anything is an error
 ```
 
@@ -61,10 +64,10 @@ by restoring a `cp -r data /tmp/backup` snapshot taken beforehand.
 browser (Vue 3 ESM, no bundler)
    |  fetch JSON
    v
-Express 5 server  ->  filesystem (agents/, hashes/runs/, state.json, settings.json)
-   |                     + child_process git (changes tab)
+Express 5 server  ->  filesystem (agents/, hashes/runs/, executions/, state.json, settings.json)
+   |                     + child_process git (changes tab, execution receipts)
    v
-node:crypto (SHA-256), child_process (git status)
+node:crypto (SHA-256), child_process (git status, git ls-files / ls-tree)
 ```
 
 No framework on the server beyond Express, no validation library beyond Ajv, no
@@ -110,8 +113,15 @@ webapp/server/
   agentsStore.js              one JSON file per agent; code<->filename rules, scanAgents()
   agentsValidation.js         checkAgent(agent, previousCode) - shared by CRUD and linking
   agentsApi.js                CRUD for agent files, GET /api/schema, POST link-files
+  agentDependencies.js        entriesOverlap / findDependencies: which outputs feed which inputs
+  dependenciesApi.js          GET /api/agent-dependencies
   gitChanges.js               git status of the workspace folder
   changesApi.js               GET /api/changes
+  executionPlan.js            buildExecutionPlan: changed paths -> ordered steps
+  executionPlanStore.js       data/execution-plan.json, tolerant of a broken file
+  executionPlanApi.js         GET/POST/PATCH /api/execution-plan
+  executionsStore.js          receipts: git blob + SHA-256 lookup, recordExecution, receiptsView
+  executionsApi.js            GET/POST /api/executions
   fsApi.js                    GET /api/fs (folder browser backend), path jail
   hashRunner.js               tree walk, parallel SHA-256, folder rollups
   hashApi.js                  POST /api/hash (NDJSON stream), GET /api/hashes
@@ -122,19 +132,23 @@ webapp/server/
   settingsStore.js            data/settings.json
   settingsValidation.js       workspace + git root rules
   settingsApi.js              GET/PUT /api/settings
+  dataFolderApi.js            GET/PUT /api/data-folder, switch + schema carry-over
 webapp/src/
   main.js                     createApp(...).mount('#app')
   api.js                      fetch wrappers; hashFolder() reads the NDJSON stream
   store.js                    all shared reactive state + actions
   format.js                   bytes / duration / time / shortHash / latestHash helpers
   components/
-    App.js                    tab strip + banner; mounts the four tabs
+    App.js                    tab strip + banner; mounts the tabs
     DataTable.js              generic sortable grid with per-column slots
     AgentsTab.js              agent grid + row actions
     AgentModal.js             schema-driven add/edit/delete popup
+    AgentDependenciesTab.js   output/input graph between agents
     HashingTab.js             path box, folder picker, hash grid, progress line
     HashDetail.js             hash history popup (newest first)
-    LinkChangesTab.js         uncommitted git files -> agent linking
+    ExecutionPlanPanel.js     ordered run plan for the changed paths
+    LinkChangesTab.js         uncommitted git files -> agent linking, record execution
+    ExecutionsTab.js          execution receipts grid, status against git
     FolderPicker.js           in-app folder browser modal
     SettingsTab.js            workspace folder + git root settings
 webapp/tools/
@@ -153,6 +167,9 @@ data/
     README.md           why the run files are not tracked
     runs/<runId>.json   one immutable file per hash run         [gitignored]
     index.json          derived cache, rebuilt on demand        [gitignored]
+  executions/
+    README.md           what a receipt is, and the commit discipline
+    <id>.json           one immutable receipt per published run [tracked]
   state.json            last hashed folder (session memory)      [gitignored]
   settings.json         workspace folder + git root (config)     [gitignored]
 data-location.json      which folder is the data folder          [gitignored]
@@ -168,6 +185,12 @@ store in git opts in by dropping that line from `.gitignore` - see
 An old single `hashes.json` is converted once at startup into run files (see
 `migrateLegacyHashes`); the original is kept as `hashes.migrated.json`, which is
 ignored as well.
+
+**Execution receipts are the opposite: they are tracked.** A receipt holds no
+absolute path and no machine name - only paths relative to the git root, each
+with the git blob id and the SHA-256 of the content - so it is safe to publish,
+and publishing it is the whole point. `data/executions/` must stay out of
+`.gitignore`.
 
 The data folder itself is a setting, so it cannot be stored inside the data
 folder - it lives in `data-location.json` next to `package.json`. Startup
@@ -253,13 +276,56 @@ both the runner and the doctor's rollup check so the two cannot drift.
 path "changed" is likewise computed, by comparing consecutive hashes in its
 assembled history - never stored, so a merge cannot corrupt it.
 
+### Execution receipts
+
+```jsonc
+// data/executions/2026-10-17T09-12-44-010Z_7f3a91cc.json - written once, never edited
+{
+  "id": "2026-10-17T09-12-44-010Z_7f3a91cc",
+  "agent": "AG-001",
+  "recordedAt": "2026-10-17T09:12:44.010Z",
+  "inputs":  [{ "path": "config/root.json", "blob": "…40 hex…", "sha256": "…64 hex…" }],
+  "outputs": [{ "path": "out/root-report.md", "blob": "…40 hex…", "sha256": "…64 hex…" }]
+}
+```
+
+A receipt answers one question across a team that shares the workspace through
+git: *has this agent already been run over these inputs, and are the outputs
+that came out of it committed?* `inputs` is the agent's
+`source_dependant_files`; `outputs` is the selection the user recorded. `blob`
+is the git object id **from the index**, `sha256` the hash of the same bytes -
+the record is written from the index, never a dirty working tree, so a receipt
+describes what the commit will actually contain.
+
+Rules the writer enforces (`server/executionsStore.js`):
+
+- **Nothing untracked or dirty.** Every input and output must be staged or
+  committed; an unstaged change is refused, because the receipt would not match
+  the commit.
+- **Republishing the same outputs for unchanged inputs is refused** with `409`,
+  and the same holds when the bytes changed but the inputs did not: that is a
+  hand-edited output, not a new run. A new receipt is only written when the
+  inputs changed. Comparing inputs uses `sameEntrySet` (same paths, same blobs).
+- **One immutable file per recording**, so two people recording at the same time
+  add two files that merge cleanly. The app never runs `git commit`; the banner
+  names the receipt and the staged paths that belong in the same commit.
+- **Unpushed means nonexistent.** Until the receipt is pushed, no teammate can
+  see the execution - which is exactly the intended semantics.
+
+`receiptsView()` computes each receipt's status against git: `valid` (inputs and
+outputs match the committed content), `stale-inputs` (an input moved on),
+`diverged` (an output no longer matches while the inputs are unchanged), or
+`unknown` when no workspace/git root is configured. The status is computed on
+read, never stored.
+
 ### npm run doctor
 
 `webapp/tools/doctor.js` is read only and exits `1` when it finds an error, so
 it can gate a commit. It reuses the server modules rather than reimplementing
 them (`scanAgents`, `validateAgentRecord`, `readAllRuns`, `rollupHash`,
-`validateWorkspaceSettings`) and prints `ERROR` / `WARNING` / `INFO` groups, or
-`--json`. Checks are listed in the README.
+`validateWorkspaceSettings`, `readAllReceipts`, `receiptsView`, `sameEntrySet`)
+and prints `ERROR` / `WARNING` / `INFO` groups, or `--json`. Checks are listed in
+the README.
 
 Two checks are guards against tampering rather than reachable states: a history
 that repeats a hash, and one that goes out of order. With deltas the writer
@@ -277,9 +343,15 @@ cannot produce either, but a hand-edited or third-party run file can.
 | `POST /api/agents/:code/link-files` | add paths to `result_generated_files` |
 | `GET /api/schema` | the schema the edit form is generated from |
 | `GET /api/changes` | uncommitted git files in the workspace folder |
+| `GET /api/agent-dependencies` | agents plus the output→input edges between them |
+| `GET` / `POST /api/execution-plan` | the saved run order, and rebuilding it from the hash view |
+| `PATCH /api/execution-plan` | toggle a step's `done` flag |
+| `GET /api/executions` | execution receipts with their status against git |
+| `POST /api/executions` | record `{agent, paths}`; `409` if already published for the same inputs |
 | `GET /api/fs?path=` | one directory listing for the folder browser |
 | `POST /api/hash` | NDJSON progress stream, see below |
 | `GET /api/hashes` | hash history assembled from the run files |
+| `POST /api/hashes/rebuild` | force a rebuild of the derived index |
 | `GET`/`PUT /api/state` | session memory (last hashed folder) |
 | `GET`/`PUT /api/settings` | workspace folder + git root |
 | `GET`/`PUT /api/data-folder` | the data folder, and switching it |
@@ -309,7 +381,7 @@ file, no index rebuild.
 Verified: after abort the process drops to 0% CPU and the run directory is
 unchanged.
 
-## 7. The four tabs
+## 7. The tabs
 
 ### Agents
 
@@ -319,6 +391,14 @@ file each. The edit popup is generated from `agents.schema.json` - fields, types
 changing the schema changes the form. Required-field checks run client-side for
 instant feedback; the authoritative validation is server-side, and its error list
 is displayed in the popup with nothing written.
+
+### Agent Dependencies
+
+A Mermaid `flowchart LR` where every agent is a node and an arrow from A to B
+means A produces something B reads. The matching rule (file vs folder wildcard,
+folder over file, nested folders - `entriesOverlap` in `agentDependencies.js`) is
+the server's job; the tab only renders the graph it returns. Mermaid is loaded
+once through the import map from `node_modules/mermaid/dist/`.
 
 ### Hashing
 
@@ -335,6 +415,12 @@ sortable and filterable.
 - **Click a row** (Files/Folders only; Runs rows are not clickable) to open
   `HashDetail`, listing every hash newest-first with its date.
 
+Below the grid, `ExecutionPlanPanel` turns the paths whose hash changed into an
+ordered list of agents to run: phase 1 are the agents whose outputs overlap a
+changed path, phase 2 the downstream closure, sorted by phase then code. Each
+step has a `done` flag the user can tick; the plan is user-authored state in
+`data/execution-plan.json` and is never committed.
+
 ### Link Changes to Agent
 
 First consumer of the Settings values. Runs `git status --porcelain -z
@@ -344,6 +430,22 @@ relative to the **git root** (what gets stored), status, workspace-relative path
 and size. Checkboxes with *Select all* / *Select none*; a dropdown lists agents
 as `CODE - Name`; the button appends the selected paths to that agent's
 `result_generated_files`, skipping paths already listed.
+
+**Record execution** uses the same selection and the same agent picker: it posts
+`{agent, paths}` to `POST /api/executions`, which reads the inputs from that
+agent's saved `source_dependant_files`, refuses anything untracked or dirty, and
+writes one receipt file. The button never runs `git commit`; on success the
+banner names `data/executions/<id>.json` and the staged paths that must ride the
+same commit. A `409` means the outputs are already published for these inputs -
+shown with the per-path reason from `err.body.errors`.
+
+### Executions
+
+A grid over `data/executions/`, newest first, one row per receipt: when it was
+recorded, which agent, how many inputs and outputs, and a status badge computed
+against git - `valid`, `inputs changed`, `diverged` or `unknown`. The status
+comes from `GET /api/executions`; the tab only displays it. With no workspace
+configured the statuses cannot be checked and the tab says so.
 
 ### Settings
 
@@ -413,6 +515,11 @@ on screen.
 | Delta run files | two users hashing at the same time used to collide on one shared document, and a merge could reorder a history so a stale hash looked current. Separate immutable files merge cleanly, and "current" is computed, never stored |
 | Identity checked on read | a file whose code disagrees with its name cannot be addressed without duplicating the record; reporting it beats showing a row that writes to the wrong file |
 | Dedupe identical hashes | repeated scans of unchanged trees otherwise fill the store with noise |
+| Execution receipts as immutable files, not one current-state document | a single mutable "which outputs are current" file would be a merge hotspot - the same problem delta run files already solved; one file per recording merges cleanly |
+| Receipts written from the git index, not the worktree | the receipt has to describe what the commit will contain; a dirty worktree would record bytes no teammate ever receives |
+| Republishing the same outputs for unchanged inputs is refused | a hand-edited output must not be published as a new run; only changed inputs make a new execution |
+| `executions` timestamps dropped from the agent record | an array of runs inside the shared agent JSON was a merge hotspot and could not say who ran what; one receipt file per run carries the fact and merges cleanly |
+| Receipts tracked while hash runs are ignored | a receipt holds only git-relative paths and hashes, so publishing it is safe and is the point; a run file holds absolute local paths |
 | `npm run doctor` reuses server modules | a second implementation of the checks could disagree with the code it checks |
 | Shared `stateFile` / `agentsValidation` | two callers, one implementation |
 | Settings separate from state | `state.json` is what the app remembers *about* a session; `settings.json` is what a human configured |
@@ -469,7 +576,10 @@ an ephemeral port and talk to it with `fetch`. The loopback Host guard needs a
 
 **How git tests work.** `test/merge.test.js` builds two real clones in temp
 folders, with this project's `.gitignore`, hashes a tree from each side through
-the real store, and runs a real `git merge`.
+the real store, and runs a real `git merge`. `test/executions.test.js` does the
+same for receipts: it makes a real repository (with its own `data/`), stages and
+commits inputs, records executions over HTTP, and merges two clones to prove the
+receipt files survive additively.
 
 **The rule for a failing test.** A test states the expected result. If it fails,
 either the expectation was wrong - in which case the expectation is rewritten to

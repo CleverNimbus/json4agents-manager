@@ -120,6 +120,17 @@ export const linkFiles = (code, paths) =>
     body: JSON.stringify({ paths }),
   });
 
+/** Execution receipts with their status against the current git state. */
+export const getExecutions = () => request('/api/executions');
+
+/** Publish one agent run as an immutable receipt file. */
+export const recordExecution = (agent, paths) =>
+  request('/api/executions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agent, paths }),
+  });
+
 /**
  * Start a hash run and consume its progress stream.
  *
