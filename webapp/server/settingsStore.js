@@ -24,15 +24,35 @@ const DEFAULTS = {
    * root must really be a git repository.
    */
   gitRoot: '',
+  /**
+   * Folders the user wants to hash often. Edited from the Settings tab; the
+   * hashing tab does not consume this list yet.
+   */
+  hashFolders: [],
   /** ISO timestamp of the last change, filled in on write. */
   updatedAt: '',
 };
+
+function normaliseFolders(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue;
+    const trimmed = entry.trim();
+    if (trimmed === '' || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
 
 function sanitise(raw) {
   const state = structuredClone(DEFAULTS);
   for (const key of ['workspaceFolder', 'gitRoot', 'updatedAt']) {
     if (typeof raw?.[key] === 'string') state[key] = raw[key].trim();
   }
+  state.hashFolders = normaliseFolders(raw?.hashFolders);
   return state;
 }
 
@@ -46,6 +66,7 @@ export async function updateSettings(patch) {
   for (const key of ['workspaceFolder', 'gitRoot']) {
     if (typeof patch?.[key] === 'string') next[key] = patch[key].trim();
   }
+  if (patch?.hashFolders !== undefined) next.hashFolders = normaliseFolders(patch.hashFolders);
   next.updatedAt = new Date().toISOString();
   return file.write(next);
 }

@@ -77,6 +77,7 @@ export const store = reactive({
     file: '',
     workspaceFolder: '',
     gitRoot: '',
+    hashFolders: [],
     updatedAt: '',
     loaded: false,
     /** Bumped on every successful save; views that depend on it watch this. */
@@ -439,6 +440,7 @@ export async function loadSettings() {
     store.settings.file = file;
     store.settings.workspaceFolder = settings?.workspaceFolder ?? '';
     store.settings.gitRoot = settings?.gitRoot ?? '';
+    store.settings.hashFolders = Array.isArray(settings?.hashFolders) ? settings.hashFolders : [];
     store.settings.updatedAt = settings?.updatedAt ?? '';
   } catch {
     /* defaults are fine */
@@ -457,6 +459,7 @@ export async function saveSettings(patch) {
   const { settings } = await api.saveSettings(patch);
   store.settings.workspaceFolder = settings.workspaceFolder;
   store.settings.gitRoot = settings.gitRoot;
+  store.settings.hashFolders = Array.isArray(settings.hashFolders) ? settings.hashFolders : [];
   store.settings.updatedAt = settings.updatedAt;
   store.settings.loaded = true;
   // Anything derived from the workspace (the changes tab) watches this and

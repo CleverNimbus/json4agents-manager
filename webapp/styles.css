@@ -666,6 +666,25 @@ table.grid td.col-select {
   text-align: center;
 }
 
+table.grid th.col-index,
+table.grid td.col-index {
+  width: 44px;
+  min-width: 44px;
+  max-width: 44px;
+  text-align: right;
+  color: var(--text-faint);
+  padding-right: 12px;
+}
+
+table.grid th.col-remove,
+table.grid td.col-remove {
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  text-align: center;
+  padding: 0 4px;
+}
+
 .row-check {
   accent-color: var(--accent);
   width: 14px;

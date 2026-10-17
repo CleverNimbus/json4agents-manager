@@ -15,7 +15,7 @@ import { request as httpRequest } from 'node:http';
 import path from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
 
-import { agent, buildTree, listNames, startApp, streamHash, tempDir, useDataFolder, write } from './helpers.js';
+import { agent, buildTree, listNames, readJson, startApp, streamHash, tempDir, useDataFolder, write } from './helpers.js';
 
 let api;
 let dir;
@@ -565,6 +565,49 @@ describe('GET and PUT /api/state', () => {
     const { status } = await api.put('/api/state', {});
     assert.equal(status, 200);
     assert.equal(await lastFolder(), '/home/you/projects');
+  });
+});
+
+describe('GET and PUT /api/settings', () => {
+  const getCollection = async () => (await api.get('/api/settings')).body.settings.hashFolders;
+
+  it('starts with an empty hash folder collection', async () => {
+    assert.deepEqual(await getCollection(), []);
+  });
+
+  it('saves a hash folder collection and returns the trimmed list', async () => {
+    const { status, body } = await api.put('/api/settings', { hashFolders: ['  /tmp/a  ', '/tmp/b'] });
+    assert.equal(status, 200);
+    assert.deepEqual(body.settings.hashFolders, ['/tmp/a', '/tmp/b']);
+    assert.deepEqual(await getCollection(), ['/tmp/a', '/tmp/b']);
+  });
+
+  it('replaces the collection wholesale when the patch lists fewer entries', async () => {
+    await api.put('/api/settings', { hashFolders: ['/tmp/a', '/tmp/b'] });
+    const { body } = await api.put('/api/settings', { hashFolders: ['/tmp/c'] });
+    assert.deepEqual(body.settings.hashFolders, ['/tmp/c']);
+    assert.deepEqual(await getCollection(), ['/tmp/c']);
+  });
+
+  it('refuses a non-array hashFolders patch and leaves the file alone', async () => {
+    await api.put('/api/settings', { hashFolders: ['/tmp/keep'] });
+    for (const patch of [{ hashFolders: 'nope' }, { hashFolders: { 0: '/tmp/x' } }, { hashFolders: [1, 2, 3] }]) {
+      const { status } = await api.put('/api/settings', patch);
+      assert.equal(status, 400, `expected ${JSON.stringify(patch)} to be refused`);
+    }
+    assert.deepEqual(await getCollection(), ['/tmp/keep']);
+  });
+
+  it('strips nullish entries and trims the rest before persisting', async () => {
+    const { status, body } = await api.put('/api/settings', { hashFolders: ['/tmp/a', null, '  /tmp/b  ', undefined] });
+    assert.equal(status, 200);
+    assert.deepEqual(body.settings.hashFolders, ['/tmp/a', '/tmp/b']);
+  });
+
+  it('writes to data/settings.json on disk', async () => {
+    await api.put('/api/settings', { hashFolders: ['/tmp/disk'] });
+    const onDisk = await readJson(path.join(dir, 'settings.json'));
+    assert.deepEqual(onDisk.hashFolders, ['/tmp/disk']);
   });
 });
 

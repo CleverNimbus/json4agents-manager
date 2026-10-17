@@ -26,7 +26,7 @@ settingsRouter.get('/api/settings', async (req, res) => {
 settingsRouter.put('/api/settings', async (req, res) => {
   const patch = req.body;
   if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) {
-    return res.status(400).json({ error: 'Expected an object like { "workspaceFolder": "/path", "gitRoot": "/path" }' });
+    return res.status(400).json({ error: 'Expected an object like { "workspaceFolder": "/path", "gitRoot": "/path", "hashFolders": ["/path"] }' });
   }
 
   const fields = ['workspaceFolder', 'gitRoot'];
@@ -36,10 +36,23 @@ settingsRouter.put('/api/settings', async (req, res) => {
     }
   }
 
+  if (patch.hashFolders !== undefined && !Array.isArray(patch.hashFolders)) {
+    return res.status(400).json({ error: 'hashFolders must be an array of strings' });
+  }
+  if (Array.isArray(patch.hashFolders) && !patch.hashFolders.every((entry) => typeof entry === 'string' || entry === null || entry === undefined)) {
+    return res.status(400).json({ error: 'hashFolders must be an array of strings' });
+  }
+
   // Merge first, then judge the pair the save would actually produce.
   const merged = { ...(await readSettings()) };
   for (const key of fields) {
     if (typeof patch[key] === 'string') merged[key] = patch[key].trim();
+  }
+  if (Array.isArray(patch.hashFolders)) {
+    merged.hashFolders = patch.hashFolders
+      .filter((entry) => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry !== '');
   }
 
   const { valid, errors } = await validateWorkspaceSettings(merged);

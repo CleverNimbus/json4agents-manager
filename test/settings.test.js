@@ -162,12 +162,12 @@ describe('settings.json', () => {
 
   it('falls back to the defaults when the file is broken, instead of failing', async () => {
     await write(path.join(dir, 'settings.json'), '{ not json');
-    assert.deepEqual(await readSettings(), { workspaceFolder: '', gitRoot: '', updatedAt: '' });
+    assert.deepEqual(await readSettings(), { workspaceFolder: '', gitRoot: '', hashFolders: [], updatedAt: '' });
   });
 
   it('falls back to the defaults when the file holds the wrong shape', async () => {
     await write(path.join(dir, 'settings.json'), { workspaceFolder: { nope: true }, gitRoot: 42 });
-    assert.deepEqual(await readSettings(), { workspaceFolder: '', gitRoot: '', updatedAt: '' });
+    assert.deepEqual(await readSettings(), { workspaceFolder: '', gitRoot: '', hashFolders: [], updatedAt: '' });
   });
 
   it('keeps the fields it knows and drops the ones it does not', async () => {
@@ -184,9 +184,35 @@ describe('settings.json', () => {
     assert.deepEqual(JSON.parse(raw).workspaceFolder, '/tmp/x');
     assert.deepEqual(await readJson(path.join(dir, 'settings.json')).then((v) => Object.keys(v).sort()), [
       'gitRoot',
+      'hashFolders',
       'updatedAt',
       'workspaceFolder',
     ]);
+  });
+
+  it('starts the hash folder collection as an empty list', async () => {
+    assert.deepEqual((await readSettings()).hashFolders, []);
+  });
+
+  it('trims and dedupes entries in the hash folder collection', async () => {
+    await updateSettings({ hashFolders: ['  /tmp/a  ', '/tmp/b', '/tmp/a', '', '/tmp/b'] });
+    assert.deepEqual((await readSettings()).hashFolders, ['/tmp/a', '/tmp/b']);
+  });
+
+  it('drops non-string entries from the hash folder collection', async () => {
+    await updateSettings({ hashFolders: ['/tmp/a', 42, null, '/tmp/b', { x: 1 }] });
+    assert.deepEqual((await readSettings()).hashFolders, ['/tmp/a', '/tmp/b']);
+  });
+
+  it('replaces the collection wholesale, not by appending', async () => {
+    await updateSettings({ hashFolders: ['/tmp/a', '/tmp/b'] });
+    await updateSettings({ hashFolders: ['/tmp/c'] });
+    assert.deepEqual((await readSettings()).hashFolders, ['/tmp/c']);
+  });
+
+  it('falls back to an empty list when the field holds the wrong shape', async () => {
+    await write(path.join(dir, 'settings.json'), { hashFolders: 'not-an-array' });
+    assert.deepEqual((await readSettings()).hashFolders, []);
   });
 });
 
