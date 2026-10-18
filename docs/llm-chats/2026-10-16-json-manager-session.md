@@ -157,7 +157,7 @@ duplicate "Select none" buttons, an empty SHA-256 column.
 
 ## 6. The test suite
 
-`npm test` → 235 tests, `node:test` only, ~16 s. Rules that made it useful:
+`npm test` exercised the real filesystem and git merge scenarios that matter here; the suite remained small, deterministic, and isolated from the repo’s real `data/` folder. Rules that made it useful:
 
 - Every test that touches data gets its own temp folder (`useDataFolder()`), so
   nothing can reach `data/`. The suite also asserts it left no
