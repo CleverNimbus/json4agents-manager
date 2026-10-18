@@ -33,10 +33,10 @@ node --version   # v22 or newer
 ```
 
 ```bash
-npm install     # 94 packages, no build step
+npm install     # install the runtime dependencies
 npm start       # http://127.0.0.1:8000
 npm run dev     # same with node --watch
-npm test        # 365 tests, node:test only, no extra dependency
+npm test        # node:test suite, real filesystem + git integration checks
 npm run doctor  # read only integrity checks, exit 1 if anything is an error
 ```
 
@@ -99,7 +99,7 @@ its compiler**, so `template: \`...\`` works, and there is no TS/JSX step.
 ## 4. File map
 
 ```
-package.json                  scripts + the four dependencies
+package.json                  scripts + the runtime dependencies
 README.md                     user documentation
 docs/ARCHITECTURE.md          this file
 data/                         all persisted data (see below)
@@ -170,6 +170,7 @@ data/
   executions/
     README.md           what a receipt is, and the commit discipline
     <id>.json           one immutable receipt per published run [tracked]
+  execution-plan.json   saved run-order snapshot for the Hashing tab [gitignored]
   state.json            last hashed folder (session memory)      [gitignored]
   settings.json         workspace folder + git root (config)     [gitignored]
 data-location.json      which folder is the data folder          [gitignored]
@@ -317,6 +318,12 @@ outputs match the committed content), `stale-inputs` (an input moved on),
 `diverged` (an output no longer matches while the inputs are unchanged), or
 `unknown` when no workspace/git root is configured. The status is computed on
 read, never stored.
+
+The execution flow the browser uses is: build a hash change set, generate or
+reload the saved plan at `data/execution-plan.json`, mark steps as done in the
+Hashing tab, and later record a receipt with the selected generated files in the
+Link Changes tab. The plan is local state for the workspace and is intentionally
+not part of the shared receipt stream.
 
 ### npm run doctor
 
