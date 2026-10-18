@@ -7,10 +7,15 @@
  *
  * Inputs: the list of agent records, and the assembled hash view (the same
  * shape the existing tab already consumes). The plan answers two questions:
- *   - which agents must run, because one of their outputs was reported as
- *     changed in the most recent hash run, and
+ *   - which agents must run, because one of their outputs or one of their
+ *     inputs was reported as changed in the most recent hash run, and
  *   - which downstream agents must follow them, because they consume one of
  *     those outputs (directly or transitively), and in what order.
+ *
+ * An output hit means the agent's own domain moved on; an input hit means
+ * something the agent reads - possibly a file no other agent produces - was
+ * edited, so the agent itself must re-run. Both make the agent a root of the
+ * plan.
  *
  * The matching rule for "X covers Y" is the same folder/file rule used by
  * the Agent Dependencies tab (see `agentDependencies.js`), so a folder
@@ -57,14 +62,22 @@ export function buildExecutionPlan(agents, view) {
   const changedPaths = collectChangedPaths(view);
   if (changedPaths.length === 0) return { changedPaths, steps: [] };
 
-  // Phase 1: agents whose outputs intersect a changed path are the roots.
+  // Phase 1: an agent is a root when a changed path overlaps one of its
+  // outputs (its own domain moved on) or one of its inputs (something it
+  // reads changed, so it must re-run - even when no other agent produces
+  // that path).
   const triggered = new Set();
-  const triggeredBy = new Map();
+  const triggeredBy = new Map(); // code -> [{ output, change } | { input, change }]
   for (const agent of all) {
     const hits = [];
     for (const output of agent.outputs) {
       for (const change of changedPaths) {
         if (entriesOverlap(output, change)) hits.push({ output, change });
+      }
+    }
+    for (const input of agent.inputs) {
+      for (const change of changedPaths) {
+        if (entriesOverlap(input, change)) hits.push({ input, change });
       }
     }
     if (hits.length > 0) {
@@ -107,14 +120,25 @@ export function buildExecutionPlan(agents, view) {
   // consumers; ties break on ascending phase, then on agent code.
   const order = topoSort(closed, byCode, edgeMap);
 
+  // A root hit and a downstream edge can both apply to one agent: its own
+  // input changed *and* a producer of that input is a root as well. The step
+  // then carries both lists, root hits first. The reason prefers the output
+  // hit, then the input hit, then plain downstream.
   const steps = order.map((code) => {
     const agent = byCode.get(code);
+    const rootHits = triggeredBy.get(code) ?? [];
+    const edgeHits = edgeMap.get(code) ?? [];
+    const reason = rootHits.some((hit) => 'output' in hit)
+      ? 'changed'
+      : rootHits.length > 0
+        ? 'input-changed'
+        : 'downstream';
     return {
       code,
       name: agent?.name ?? '',
       phase: agent?.phase ?? 0,
-      reason: triggeredBy.has(code) ? 'changed' : 'downstream',
-      triggers: triggeredBy.get(code) ?? edgeMap.get(code) ?? [],
+      reason,
+      triggers: [...rootHits, ...edgeHits],
     };
   });
 

@@ -79,7 +79,7 @@ describe('buildExecutionPlan', () => {
     assert.equal(plan.steps[0].code, 'A');
   });
 
-  it('adds a downstream consumer whose input is covered by a triggered output', () => {
+  it('adds a consumer whose input changed: it is a root, yet still ordered after its producer', () => {
     const plan = buildExecutionPlan(
       [
         ag('A', { phase: 1, outputs: ['out/*'] }),
@@ -88,9 +88,10 @@ describe('buildExecutionPlan', () => {
       viewOf([changedFile('out/X.md', 'new', 'old')]),
     );
     const codes = plan.steps.map((step) => step.code);
-    assert.deepEqual(codes, ['A', 'B']);
-    assert.equal(plan.steps[1].reason, 'downstream');
-    assert.equal(plan.steps[1].triggers[0].fromCode, 'A');
+    assert.deepEqual(codes, ['A', 'B'], 'the topo sort still puts the producer first');
+    assert.equal(plan.steps[1].reason, 'input-changed', 'B re-runs because its own input changed');
+    const edge = plan.steps[1].triggers.find((trigger) => trigger.fromCode === 'A');
+    assert.ok(edge, 'the downstream edge is still reported alongside the input hit');
   });
 
   it('walks the full transitive downstream chain (grandchild included)', () => {
@@ -135,7 +136,8 @@ describe('buildExecutionPlan', () => {
 
   it('aggregates every matching edge on a single downstream step', () => {
     // A produces two things; B consumes both, so B is downstream of A on
-    // two distinct edges.
+    // two distinct edges. B's input `out/*` also overlaps the changed path,
+    // so the step carries the input root hit as well.
     const plan = buildExecutionPlan(
       [
         ag('A', { phase: 1, outputs: ['out/X.md', 'src/*'] }),
@@ -143,8 +145,10 @@ describe('buildExecutionPlan', () => {
       ],
       viewOf([changedFile('out/X.md', 'n', 'o')]),
     );
-    const triggers = plan.steps[1].triggers;
-    assert.equal(triggers.length, 2);
+    const step = plan.steps[1];
+    assert.equal(step.reason, 'input-changed');
+    assert.equal(step.triggers.filter((trigger) => trigger.fromCode).length, 2, 'two downstream edges');
+    assert.equal(step.triggers.filter((trigger) => trigger.input && !trigger.fromCode).length, 1, 'one input root hit');
   });
 
   it('survives a cycle by appending the leftover agent at the end', () => {
@@ -160,5 +164,48 @@ describe('buildExecutionPlan', () => {
     const codes = plan.steps.map((step) => step.code);
     assert.deepEqual(codes.sort(), ['A', 'B']);
     assert.equal(plan.steps.length, 2);
+  });
+
+  it('lists an agent whose input is exactly a changed file, even when no agent produces it', () => {
+    const plan = buildExecutionPlan(
+      [ag('A', { inputs: ['cfg/app.json'] })],
+      viewOf([changedFile('cfg/app.json', 'new', 'old')]),
+    );
+    assert.equal(plan.steps.length, 1);
+    assert.equal(plan.steps[0].reason, 'input-changed');
+    assert.deepEqual(plan.steps[0].triggers, [{ input: 'cfg/app.json', change: 'cfg/app.json' }]);
+  });
+
+  it('lists an agent when a changed file lies inside its folder input', () => {
+    const plan = buildExecutionPlan(
+      [ag('A', { inputs: ['cfg/*'] })],
+      viewOf([changedFile('cfg/app.json', 'new', 'old')]),
+    );
+    assert.equal(plan.steps.length, 1);
+    assert.equal(plan.steps[0].reason, 'input-changed');
+  });
+
+  it('prefers the output reason when one agent is hit on both sides, and reports both hits', () => {
+    const plan = buildExecutionPlan(
+      [ag('A', { inputs: ['cfg/*'], outputs: ['out/*'] })],
+      viewOf([changedFile('out/X.md', 'n', 'o'), changedFile('cfg/app.json', 'n', 'o')]),
+    );
+    assert.equal(plan.steps.length, 1);
+    assert.equal(plan.steps[0].reason, 'changed');
+    assert.equal(plan.steps[0].triggers.length, 2, 'one output hit and one input hit');
+  });
+
+  it('fans out downstream from an input-changed root', () => {
+    const plan = buildExecutionPlan(
+      [
+        ag('A', { phase: 1, inputs: ['cfg/app.json'], outputs: ['out/*'] }),
+        ag('B', { phase: 2, inputs: ['out/X.md'] }),
+      ],
+      viewOf([changedFile('cfg/app.json', 'new', 'old')]),
+    );
+    const codes = plan.steps.map((step) => step.code);
+    assert.deepEqual(codes, ['A', 'B']);
+    assert.equal(plan.steps[0].reason, 'input-changed');
+    assert.equal(plan.steps[1].reason, 'downstream', 'B reads an output of A, whose input changed');
   });
 });

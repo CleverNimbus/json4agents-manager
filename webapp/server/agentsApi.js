@@ -28,6 +28,7 @@ import {
   updateAgent,
 } from './agentsStore.js';
 import { checkAgent } from './agentsValidation.js';
+import { entriesOverlap } from './agentDependencies.js';
 import { readSettings } from './settingsStore.js';
 import { loadSchema, validateAgentCollection, validateAgentRecord } from './validate.js';
 
@@ -79,6 +80,26 @@ agentsRouter.delete('/api/agents/:code', async (req, res) => {
 });
 
 /**
+ * Validate the raw `paths` body field shared by both link endpoints: a list
+ * of non-empty strings, each relative to the configured git root. Returns
+ * the trimmed paths, or `{ error }` naming the first problem.
+ */
+function readPathList(rawPaths) {
+  if (!Array.isArray(rawPaths)) {
+    return { error: 'Expected { "paths": ["relative/path", …] }' };
+  }
+  for (const entry of rawPaths) {
+    if (typeof entry !== 'string' || entry.trim() === '') {
+      return { error: 'Every path must be a non empty string' };
+    }
+    if (path.isAbsolute(entry) || entry.split(/[\\/]/).includes('..')) {
+      return { error: `Path must be relative to the git root: ${entry}` };
+    }
+  }
+  return { paths: rawPaths.map((value) => value.trim()) };
+}
+
+/**
  * Link uncommitted files to an agent: the parent folder of each path is
  * added to the agent's `result_generated_files` as `<folder>/*`, with
  * duplicates of the same folder collapsed. A file at the git root is
@@ -86,18 +107,8 @@ agentsRouter.delete('/api/agents/:code', async (req, res) => {
  * Paths must be relative to the configured git root.
  */
 agentsRouter.post('/api/agents/:code/link-files', async (req, res) => {
-  const { paths } = req.body ?? {};
-  if (!Array.isArray(paths)) {
-    return res.status(400).json({ error: 'Expected { "paths": ["relative/path", …] }' });
-  }
-  for (const entry of paths) {
-    if (typeof entry !== 'string' || entry.trim() === '') {
-      return res.status(400).json({ error: 'Every path must be a non empty string' });
-    }
-    if (path.isAbsolute(entry) || entry.split(/[\\/]/).includes('..')) {
-      return res.status(400).json({ error: `Path must be relative to the git root: ${entry}` });
-    }
-  }
+  const parsed = readPathList(req.body?.paths);
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
 
   const { gitRoot } = await readSettings();
   const agent = await readAgent(req.params.code);
@@ -107,10 +118,9 @@ agentsRouter.post('/api/agents/:code/link-files', async (req, res) => {
   // Group the changed files by their parent folder, keeping the order in
   // which each folder is first seen. A file's folder reference is
   // `<dirname>/*` - `./*` for a file at the git root.
-  const trimmed = paths.map((value) => value.trim());
   const folderEntries = [];
   const seen = new Set();
-  for (const file of trimmed) {
+  for (const file of parsed.paths) {
     const entry = `${path.dirname(file)}/*`;
     if (seen.has(entry)) continue;
     seen.add(entry);
@@ -138,6 +148,48 @@ agentsRouter.post('/api/agents/:code/link-files', async (req, res) => {
     alreadyPresent: folderEntries.length - added.length,
     gitRoot,
   });
+});
+
+/**
+ * Link uncommitted files to an agent as inputs: each selected file is added
+ * to the agent's `source_dependant_files` as the exact path. Unlike the
+ * output link no folder wildcard is inferred - an execution receipt reads
+ * its inputs from the git index by exact path, so a `<folder>/*` entry would
+ * resolve to nothing. A path that is already listed, or already covered by
+ * an existing folder entry, is skipped. Paths must be relative to the
+ * configured git root.
+ */
+agentsRouter.post('/api/agents/:code/link-inputs', async (req, res) => {
+  const parsed = readPathList(req.body?.paths);
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+
+  const { gitRoot } = await readSettings();
+  const agent = await readAgent(req.params.code);
+  const existing = Array.isArray(agent.source_dependant_files) ? agent.source_dependant_files : [];
+
+  const added = [];
+  let alreadyPresent = 0;
+  for (const entry of parsed.paths) {
+    const covered = added.includes(entry) || existing.some((old) => entriesOverlap(old, entry));
+    if (covered) {
+      alreadyPresent += 1;
+      continue;
+    }
+    added.push(entry);
+  }
+
+  if (added.length === 0) {
+    return res.json({ ok: true, file: pathFor(agent.code), agent, added: [], alreadyPresent, gitRoot });
+  }
+
+  const updated = { ...agent, source_dependant_files: [...existing, ...added] };
+  const checked = await checkAgent(updated, agent.code);
+  if (!checked.valid) {
+    return res.status(400).json({ error: 'The agent would not match the schema', errors: checked.errors });
+  }
+
+  const saved = await updateAgent(agent.code, updated);
+  return res.json({ ok: true, file: pathFor(saved.code), agent: saved, added, alreadyPresent, gitRoot });
 });
 
 agentsRouter.get('/api/schema', async (req, res) => {

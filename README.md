@@ -52,12 +52,16 @@ rows whose content changed; click one for its full history. Re-hashing an
 unchanged tree records almost nothing.
 
 **Link Changes to Agent** - the uncommitted files in your workspace, from
-`git status`, with checkboxes and an agent picker that writes the selection into
-that agent's `result_generated_files`. The same selection can be recorded as an
-execution.
+`git status`, with checkboxes and an agent picker. Each row already says which
+agents consume or produce that path. *Link as output* writes the selection into
+the agent's `result_generated_files` as `folder/*` references; *Link as input*
+writes the exact paths into `source_dependant_files`, which is what an
+execution receipt reads. The same selection can be recorded as an execution.
 
 **Execution plan** - after hashing, the app can rebuild an ordered run plan from
-the changed paths and downstream dependencies. The plan is stored in
+the changed paths: an agent is a root when a changed path overlaps one of its
+outputs **or** one of its inputs, so an edited input triggers the agents that
+read it even when nothing generates that file. The plan is stored in
 `data/execution-plan.json`, where each step records whether it is done and can
 be regenerated at any time from the current hash view.
 
@@ -213,8 +217,9 @@ the defaults instead of breaking the app.
 | `PUT /api/agents/:code` | update that file; renames it when the code changed |
 | `DELETE /api/agents/:code` | remove the file |
 | `GET /api/schema` | the JSON Schema, used to build the edit form |
-| `GET /api/changes` | uncommitted git files inside the workspace folder |
+| `GET /api/changes` | uncommitted git files inside the workspace folder, each with the `consumers` / `producers` agent codes |
 | `POST /api/agents/:code/link-files` | add paths to that agent's `result_generated_files` |
+| `POST /api/agents/:code/link-inputs` | add exact paths to that agent's `source_dependant_files` |
 | `GET /api/agent-dependencies` | agents plus the edges where one agent's output feeds another's input |
 | `GET /api/execution-plan` | the saved run order for the paths that changed, with per-step `done` flags |
 | `POST /api/execution-plan/generate` | rebuild that plan from the current hash view |
@@ -244,12 +249,13 @@ webapp/server/
   validate.js                 Ajv 2020-12: record and collection validators
   agentsStore.js              one JSON file per agent in data/agents/
   agentsApi.js                CRUD for the agent files, GET /api/schema,
-                              POST /api/agents/:code/link-files
+                              POST /api/agents/:code/link-files, link-inputs
   agentsValidation.js         one agent record + its collection, shared by both
-  agentDependencies.js        which agents' outputs feed other agents' inputs
+  agentDependencies.js        which agents' outputs feed other agents' inputs;
+                              consumersOf / producersOf: who touches one path
   dependenciesApi.js          GET /api/agent-dependencies
   gitChanges.js               git status of the workspace folder, relative to the git root
-  changesApi.js               GET /api/changes
+  changesApi.js               GET /api/changes, rows stamped with consumers / producers
   executionPlan.js            run order derived from the changed paths
   executionPlanStore.js       data/execution-plan.json, tolerant of a broken file
   executionPlanApi.js         GET/POST/PATCH /api/execution-plan

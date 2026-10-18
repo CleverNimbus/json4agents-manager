@@ -187,14 +187,19 @@ export default {
             <span class="execution-plan-name">{{ step.name }}</span>
             <span class="badge execution-plan-phase">phase {{ step.phase }}</span>
           </label>
+          <!-- One list, three shapes: root hit on an output, root hit on an
+               input, and a downstream edge from another agent. -->
           <ul v-if="step.triggers.length > 0" class="execution-plan-triggers">
             <li v-for="(trigger, j) in step.triggers" :key="j">
-              <template v-if="step.reason === 'changed'">
-                changed: <code>{{ trigger.output }}</code> overlaps <code>{{ trigger.change }}</code>
-              </template>
-              <template v-else>
+              <template v-if="trigger.fromCode">
                 after <code>{{ trigger.fromCode }}</code>:
                 <code>{{ trigger.output }}</code> → <code>{{ trigger.input }}</code>
+              </template>
+              <template v-else-if="trigger.output">
+                output changed: <code>{{ trigger.output }}</code> overlaps <code>{{ trigger.change }}</code>
+              </template>
+              <template v-else>
+                input changed: <code>{{ trigger.input }}</code> overlaps <code>{{ trigger.change }}</code>
               </template>
             </li>
           </ul>

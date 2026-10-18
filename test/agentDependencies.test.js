@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { entriesOverlap, findDependencies } from '../webapp/server/agentDependencies.js';
+import { consumersOf, entriesOverlap, findDependencies, producersOf } from '../webapp/server/agentDependencies.js';
 
 const ag = (code, { name = `Agent ${code}`, inputs = [], outputs = [] } = {}) => ({
   code,
@@ -141,5 +141,56 @@ describe('findDependencies', () => {
   it('returns nodes in the order they were given', () => {
     const graph = findDependencies([ag('C'), ag('A'), ag('B')]);
     assert.deepEqual(graph.agents.map((n) => n.code), ['C', 'A', 'B']);
+  });
+});
+
+describe('consumersOf', () => {
+  it('names the agents whose exact input is the changed path', () => {
+    const agents = [ag('A', { outputs: ['out/X.md'] }), ag('B', { inputs: ['out/X.md'] })];
+    assert.deepEqual(consumersOf('out/X.md', agents), ['B']);
+  });
+
+  it('names the agents whose folder input covers the changed path', () => {
+    const agents = [ag('B', { inputs: ['out/*'] }), ag('C', { inputs: ['src/main.js'] })];
+    assert.deepEqual(consumersOf('out/X.md', agents), ['B']);
+  });
+
+  it('names every agent that reads the path, in the order given', () => {
+    const agents = [ag('B', { inputs: ['out/*'] }), ag('C', { inputs: ['out/X.md'] }), ag('D')];
+    assert.deepEqual(consumersOf('out/X.md', agents), ['B', 'C']);
+  });
+
+  it('returns an empty list when no agent reads the path', () => {
+    const agents = [ag('B', { inputs: ['src/*'] })];
+    assert.deepEqual(consumersOf('docs/r.md', agents), []);
+  });
+
+  it('treats a missing or non-array entry list as empty', () => {
+    assert.deepEqual(consumersOf('out/X.md', [ag('B', { inputs: undefined }), ag('C', {})]), []);
+  });
+
+  it('returns an empty list when there are no agents at all', () => {
+    assert.deepEqual(consumersOf('out/X.md', []), []);
+  });
+});
+
+describe('producersOf', () => {
+  it('names the agent whose exact output is the changed path', () => {
+    const agents = [ag('A', { outputs: ['out/X.md'] }), ag('B', { inputs: ['out/X.md'] })];
+    assert.deepEqual(producersOf('out/X.md', agents), ['A']);
+  });
+
+  it('names the agent whose folder output covers the changed path', () => {
+    const agents = [ag('A', { outputs: ['out/*'] })];
+    assert.deepEqual(producersOf('out/X.md', agents), ['A']);
+  });
+
+  it('returns an empty list when no agent produces the path', () => {
+    const agents = [ag('A', { outputs: ['out/*'] })];
+    assert.deepEqual(producersOf('docs/r.md', agents), []);
+  });
+
+  it('treats a missing or non-array entry list as empty', () => {
+    assert.deepEqual(producersOf('out/X.md', [ag('A', {})]), []);
   });
 });

@@ -49,6 +49,34 @@ export function entriesOverlap(a, b) {
  * between a producer's outputs and a consumer's inputs contributes one edge
  * (with every matching (output, input) pair listed under `via`).
  */
+/**
+ * Agent codes whose `source_dependant_files` cover `path`, in the order the
+ * agents were given. This is the reverse mapping the Agent Dependencies tab
+ * cannot show: a changed path can name the agents that must re-run, even when
+ * no other agent produces that path.
+ */
+export function consumersOf(path, agents) {
+  const codes = [];
+  for (const agent of agents ?? []) {
+    const inputs = Array.isArray(agent.source_dependant_files) ? agent.source_dependant_files : [];
+    if (inputs.some((entry) => entriesOverlap(entry, path))) codes.push(agent.code);
+  }
+  return codes;
+}
+
+/**
+ * Agent codes whose `result_generated_files` cover `path`, in the order the
+ * agents were given - "which agent generated this file".
+ */
+export function producersOf(path, agents) {
+  const codes = [];
+  for (const agent of agents ?? []) {
+    const outputs = Array.isArray(agent.result_generated_files) ? agent.result_generated_files : [];
+    if (outputs.some((entry) => entriesOverlap(entry, path))) codes.push(agent.code);
+  }
+  return codes;
+}
+
 export function findDependencies(agents) {
   const nodes = agents.map((agent) => ({
     code: agent.code,

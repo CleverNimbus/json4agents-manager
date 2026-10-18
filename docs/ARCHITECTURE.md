@@ -112,11 +112,12 @@ webapp/server/
   validate.js                 Ajv setup; validateAgentRecord, validateAgentCollection
   agentsStore.js              one JSON file per agent; code<->filename rules, scanAgents()
   agentsValidation.js         checkAgent(agent, previousCode) - shared by CRUD and linking
-  agentsApi.js                CRUD for agent files, GET /api/schema, POST link-files
-  agentDependencies.js        entriesOverlap / findDependencies: which outputs feed which inputs
+  agentsApi.js                CRUD for agent files, GET /api/schema, POST link-files / link-inputs
+  agentDependencies.js        entriesOverlap / findDependencies: which outputs feed which inputs;
+                              consumersOf / producersOf: which agents read or produce one path
   dependenciesApi.js          GET /api/agent-dependencies
   gitChanges.js               git status of the workspace folder
-  changesApi.js               GET /api/changes
+  changesApi.js               GET /api/changes, rows stamped with consumers / producers
   executionPlan.js            buildExecutionPlan: changed paths -> ordered steps
   executionPlanStore.js       data/execution-plan.json, tolerant of a broken file
   executionPlanApi.js         GET/POST/PATCH /api/execution-plan
@@ -348,8 +349,9 @@ cannot produce either, but a hand-edited or third-party run file can.
 | `PUT /api/agents/:code` | update; renames the file when the code changed |
 | `DELETE /api/agents/:code` | remove the file |
 | `POST /api/agents/:code/link-files` | add paths to `result_generated_files` |
+| `POST /api/agents/:code/link-inputs` | add exact paths to `source_dependant_files` |
 | `GET /api/schema` | the schema the edit form is generated from |
-| `GET /api/changes` | uncommitted git files in the workspace folder |
+| `GET /api/changes` | uncommitted git files in the workspace folder, each row stamped with the `consumers` / `producers` agent codes |
 | `GET /api/agent-dependencies` | agents plus the output→input edges between them |
 | `GET` / `POST /api/execution-plan` | the saved run order, and rebuilding it from the hash view |
 | `PATCH /api/execution-plan` | toggle a step's `done` flag |
@@ -423,8 +425,13 @@ sortable and filterable.
   `HashDetail`, listing every hash newest-first with its date.
 
 Below the grid, `ExecutionPlanPanel` turns the paths whose hash changed into an
-ordered list of agents to run: phase 1 are the agents whose outputs overlap a
-changed path, phase 2 the downstream closure, sorted by phase then code. Each
+ordered list of agents to run: phase 1 are the agents whose outputs **or**
+inputs overlap a changed path. An output hit means the agent's own domain moved
+on (`reason: changed`); an input hit means something the agent reads was edited,
+even when no other agent produces that path (`reason: input-changed`). A step
+hit on both sides keeps the `changed` reason and carries both hits. Phase 2 is
+the downstream closure; ordering is topological by phase then code, and each
+step lists its root hits followed by the downstream edges (`fromCode`). Each
 step has a `done` flag the user can tick; the plan is user-authored state in
 `data/execution-plan.json` and is never committed.
 
@@ -434,9 +441,23 @@ First consumer of the Settings values. Runs `git status --porcelain -z
 --untracked-files=all` at the git root, keeps entries inside the workspace
 folder, and skips deleted/unmerged paths and non-files. Rows carry the path
 relative to the **git root** (what gets stored), status, workspace-relative path
-and size. Checkboxes with *Select all* / *Select none*; a dropdown lists agents
-as `CODE - Name`; the button appends the selected paths to that agent's
-`result_generated_files`, skipping paths already listed.
+and size. The server stamps every row with the agent codes that already read it
+(`consumers`) or produce it (`producers`), computed with the same overlap rule
+as the Agent Dependencies tab (`consumersOf` / `producersOf`), and the table
+shows that as a short hint; a broken agent store degrades to empty lists rather
+than breaking the listing. Checkboxes with *Select all* / *Select none*; a
+dropdown lists agents as `CODE - Name`, and two buttons act on the selection:
+
+- **Link as output** appends to the agent's `result_generated_files`, as
+  `<folder>/*` references (`POST link-files`).
+- **Link as input** appends the **exact paths** to the agent's
+  `source_dependant_files` (`POST link-inputs`). No folder wildcard is inferred
+  here: an execution receipt reads its inputs from the git index by exact
+  path, so a `<folder>/*` entry would resolve to nothing. A path already listed
+  or already covered by an existing folder entry is skipped.
+
+Both buttons reject absolute paths and `..` segments, and validate the record
+with the schema before writing.
 
 **Record execution** uses the same selection and the same agent picker: it posts
 `{agent, paths}` to `POST /api/executions`, which reads the inputs from that
@@ -527,6 +548,8 @@ on screen.
 | Republishing the same outputs for unchanged inputs is refused | a hand-edited output must not be published as a new run; only changed inputs make a new execution |
 | `executions` timestamps dropped from the agent record | an array of runs inside the shared agent JSON was a merge hotspot and could not say who ran what; one receipt file per run carries the fact and merges cleanly |
 | Receipts tracked while hash runs are ignored | a receipt holds only git-relative paths and hashes, so publishing it is safe and is the point; a run file holds absolute local paths |
+| Input links stored as exact paths, output links as folder wildcards | an execution receipt reads its inputs from the git index by exact path, so a `<folder>/*` input would resolve to nothing; outputs only need to name the folder the agent owns |
+| `/api/changes` rows stamped with `consumers` / `producers` | the reverse mapping "which agent reads or generates this path" is needed to make a changed file tell you which agents are affected, and the agent records are already the single source for it |
 | `npm run doctor` reuses server modules | a second implementation of the checks could disagree with the code it checks |
 | Shared `stateFile` / `agentsValidation` | two callers, one implementation |
 | Settings separate from state | `state.json` is what the app remembers *about* a session; `settings.json` is what a human configured |

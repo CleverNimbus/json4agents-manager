@@ -4,8 +4,10 @@
  */
 /**
  * Link Changes to Agent: uncommitted git files inside the workspace folder,
- * selectable, linked to an agent's result_generated_files as paths relative to
- * the workspace git root.
+ * selectable, linked to an agent's outputs (`result_generated_files`, as
+ * folder references) or inputs (`source_dependant_files`, as exact paths).
+ * The server stamps each row with the agents that already read or produce
+ * it, and the table shows that as a hint.
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import DataTable from './DataTable.js';
@@ -15,10 +17,19 @@ import { loadAgents, publishExecution, setBanner, store } from '../store.js';
 
 const SELECT_COLUMN = { key: 'select', label: '', sortable: false, text: () => '', className: 'col-select' };
 
+/** "feeds AG-002 · made by AG-001" from the enriched rows, or a dash. */
+const agentHint = (row) => {
+  const parts = [];
+  if (Array.isArray(row.consumers) && row.consumers.length > 0) parts.push(`feeds ${row.consumers.join(', ')}`);
+  if (Array.isArray(row.producers) && row.producers.length > 0) parts.push(`made by ${row.producers.join(', ')}`);
+  return parts.join(' · ') || '—';
+};
+
 const columns = [
   SELECT_COLUMN,
   { key: 'path', label: 'File (relative to git root)', className: 'mono' },
   { key: 'status', label: 'Status', value: (row) => row.status },
+  { key: 'agents', label: 'Agents', text: (row) => agentHint(row), title: (row) => agentHint(row) },
   { key: 'workspacePath', label: 'In workspace', className: 'mono' },
   { key: 'size', label: 'Size', align: 'right', value: (row) => row.size ?? 0, text: (row) => formatBytes(row.size) },
 ];
@@ -90,18 +101,27 @@ export default {
       selected.value = new Set();
     };
 
-    async function link() {
+    /**
+     * Append the selected files to the chosen agent - as folder references in
+     * `result_generated_files` (outputs) or as exact paths in
+     * `source_dependant_files` (inputs). The server skips whatever is already
+     * listed or already covered.
+     */
+    async function linkPaths(role) {
       const paths = selectedPaths.value;
       if (selectedAgent.value === '' || paths.length === 0) return;
       linking.value = true;
       error.value = '';
       try {
-        const result = await api.linkFiles(selectedAgent.value, paths);
+        const result = role === 'input'
+          ? await api.linkInputs(selectedAgent.value, paths)
+          : await api.linkFiles(selectedAgent.value, paths);
         await loadAgents();
+        const unit = role === 'input' ? 'path(s)' : 'folder(s)';
         const parts = [`${result.added.length} added`];
-        if (result.alreadyPresent > 0) parts.push(`${result.alreadyPresent} already listed`);
+        if (result.alreadyPresent > 0) parts.push(`${result.alreadyPresent} already present`);
         parts.push(`in data/agents/${result.agent.code}.json`);
-        setBanner('info', `Linked ${result.added.length} folder(s): ${parts.join(', ')}.`);
+        setBanner('info', `Linked ${result.added.length} ${unit} as ${role}(s): ${parts.join(', ')}.`);
       } catch (err) {
         error.value = err.message;
         setBanner('error', `Could not link the files: ${err.message}`);
@@ -109,6 +129,9 @@ export default {
         linking.value = false;
       }
     }
+
+    const link = () => linkPaths('output');
+    const linkInput = () => linkPaths('input');
 
     /**
      * Publish an execution receipt for the selected files. The server hashes
@@ -151,6 +174,7 @@ export default {
       error,
       info,
       link,
+      linkInput,
       linking,
       loading,
       record,
@@ -227,7 +251,12 @@ export default {
               class="primary"
               @click="link"
               :disabled="linking || selectedAgent === '' || selected.size === 0"
-            >Link changes to agent</button>
+            >Link as output</button>
+            <button
+              type="button"
+              @click="linkInput"
+              :disabled="linking || selectedAgent === '' || selected.size === 0"
+            >Link as input</button>
             <button
               type="button"
               class="primary"
@@ -236,8 +265,12 @@ export default {
             >Record execution</button>
           </div>
           <p class="link-note">
-            Selected files are appended to <span class="mono">result_generated_files</span> of the chosen
-            agent, as paths relative to the git root. Files that are already listed are skipped.
+            <strong>Link as output</strong> appends the selected files to
+            <span class="mono">result_generated_files</span> of the chosen agent as
+            <span class="mono">folder/*</span> references; <strong>Link as input</strong> appends them to
+            <span class="mono">source_dependant_files</span> as the exact paths, which is what an execution
+            receipt reads. Everything is relative to the git root; files already listed or already covered
+            are skipped.
             <span v-if="selectedAgent">
               Agent file: <span class="mono">data/agents/{{ selectedAgent }}.json</span>
             </span>

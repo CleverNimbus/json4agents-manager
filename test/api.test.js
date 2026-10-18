@@ -379,6 +379,104 @@ describe('POST /api/agents/:code/link-files', () => {
   });
 });
 
+describe('POST /api/agents/:code/link-inputs', () => {
+  beforeEach(async () => {
+    await api.post('/api/agents', { agent: agent('AG-001') });
+  });
+
+  it('saves the exact paths into source_dependant_files', async () => {
+    const { status, body } = await api.post('/api/agents/AG-001/link-inputs', {
+      paths: ['src/a.js', 'docs/readme.md'],
+    });
+    assert.equal(status, 200);
+    assert.deepEqual(body.added, ['src/a.js', 'docs/readme.md']);
+    assert.equal(body.alreadyPresent, 0);
+    assert.deepEqual(body.agent.source_dependant_files, ['src/a.js', 'docs/readme.md']);
+
+    const onDisk = JSON.parse(await fs.readFile(path.join(agentsDir(), 'AG-001.json'), 'utf8'));
+    assert.deepEqual(onDisk.source_dependant_files, ['src/a.js', 'docs/readme.md'], 'the JSON file on disk holds the exact paths');
+  });
+
+  it('keeps the exact paths in the order they were sent, no folder collapsing', async () => {
+    const { body } = await api.post('/api/agents/AG-001/link-inputs', {
+      paths: ['docs/z.md', 'src/a.js', 'src/b.js'],
+    });
+
+    assert.deepEqual(body.added, ['docs/z.md', 'src/a.js', 'src/b.js'], 'each file stays its own entry');
+    assert.deepEqual(body.agent.source_dependant_files, ['docs/z.md', 'src/a.js', 'src/b.js']);
+  });
+
+  it('appends to inputs that are already listed', async () => {
+    await api.post('/api/agents', {
+      agent: agent('AG-002', { source_dependant_files: ['cfg/base.json'] }),
+    });
+    const { body } = await api.post('/api/agents/AG-002/link-inputs', { paths: ['cfg/extra.json'] });
+
+    assert.deepEqual(body.added, ['cfg/extra.json']);
+    assert.deepEqual(body.agent.source_dependant_files, ['cfg/base.json', 'cfg/extra.json']);
+  });
+
+  it('skips a path that is already listed', async () => {
+    await api.post('/api/agents/AG-001/link-inputs', { paths: ['src/a.js'] });
+    const { body } = await api.post('/api/agents/AG-001/link-inputs', { paths: ['src/a.js', 'src/b.js'] });
+
+    assert.deepEqual(body.added, ['src/b.js']);
+    assert.equal(body.alreadyPresent, 1);
+    assert.deepEqual(body.agent.source_dependant_files, ['src/a.js', 'src/b.js']);
+  });
+
+  it('skips a path already covered by an existing folder entry', async () => {
+    await api.post('/api/agents', {
+      agent: agent('AG-002', { source_dependant_files: ['src/*'] }),
+    });
+    const { body } = await api.post('/api/agents/AG-002/link-inputs', { paths: ['src/a.js', 'docs/r.md'] });
+
+    assert.deepEqual(body.added, ['docs/r.md'], 'src/a.js is already covered by src/*');
+    assert.equal(body.alreadyPresent, 1);
+    assert.deepEqual(body.agent.source_dependant_files, ['src/*', 'docs/r.md']);
+  });
+
+  it('skips a duplicate path inside one request', async () => {
+    const { body } = await api.post('/api/agents/AG-001/link-inputs', {
+      paths: ['src/a.js', 'src/a.js'],
+    });
+
+    assert.deepEqual(body.added, ['src/a.js']);
+    assert.equal(body.alreadyPresent, 1);
+  });
+
+  it('writes nothing when every path is already covered', async () => {
+    await api.post('/api/agents', {
+      agent: agent('AG-002', { source_dependant_files: ['src/*'] }),
+    });
+    const { body } = await api.post('/api/agents/AG-002/link-inputs', { paths: ['src/a.js'] });
+
+    assert.deepEqual(body.added, []);
+    assert.equal(body.alreadyPresent, 1);
+    assert.deepEqual(body.agent.source_dependant_files, ['src/*'], 'the record is untouched');
+  });
+
+  it('refuses a path that is absolute or escapes the git root', async () => {
+    for (const bad of ['/etc/passwd', '../outside.txt', 'a/../../b.txt']) {
+      const { status } = await api.post('/api/agents/AG-001/link-inputs', { paths: [bad] });
+      assert.equal(status, 400, `expected ${bad} to be refused`);
+    }
+    const { body } = await api.get('/api/agents/AG-001');
+    assert.equal(body.agent.source_dependant_files, undefined, 'nothing was written');
+  });
+
+  it('refuses a body that is not a list of paths', async () => {
+    for (const payload of [{}, { paths: 'src/a.js' }, { paths: [''] }, { paths: [null] }]) {
+      assert.equal((await api.post('/api/agents/AG-001/link-inputs', payload)).status, 400);
+    }
+  });
+
+  it('answers 404 for an agent that does not exist', async () => {
+    const { status } = await api.post('/api/agents/AG-404/link-inputs', { paths: ['a.js'] });
+    assert.equal(status, 404);
+  });
+});
+
 describe('POST /api/hash', () => {
   it('streams a start, progress, and a summary that names the run file', async () => {
     const tree = await buildTree(await tempDir('tree'), { 'a.txt': 'a', 'sub/b.txt': 'b' });

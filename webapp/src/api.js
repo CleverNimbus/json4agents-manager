@@ -120,6 +120,14 @@ export const linkFiles = (code, paths) =>
     body: JSON.stringify({ paths }),
   });
 
+/** Add files as exact paths to an agent's source_dependant_files. */
+export const linkInputs = (code, paths) =>
+  request(`/api/agents/${encodeURIComponent(code)}/link-inputs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths }),
+  });
+
 /** Execution receipts with their status against the current git state. */
 export const getExecutions = () => request('/api/executions');
 
