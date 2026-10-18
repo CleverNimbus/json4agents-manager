@@ -24,7 +24,7 @@ npm install
 npm start        # http://127.0.0.1:8000
 ```
 
-Node 22 or newer. No build step, no bundler, four dependencies.
+Node 22 or newer. No build step, no bundler; the app keeps its runtime dependencies intentionally small and browser-native.
 
 ## Contents
 
@@ -55,6 +55,11 @@ unchanged tree records almost nothing.
 `git status`, with checkboxes and an agent picker that writes the selection into
 that agent's `result_generated_files`. The same selection can be recorded as an
 execution.
+
+**Execution plan** - after hashing, the app can rebuild an ordered run plan from
+the changed paths and downstream dependencies. The plan is stored in
+`data/execution-plan.json`, where each step records whether it is done and can
+be regenerated at any time from the current hash view.
 
 **Executions** - a receipt per published run: the git blob and SHA-256 of the
 selected outputs and of the agent's `source_dependant_files`, in one immutable
@@ -160,6 +165,7 @@ data/
   executions/
     README.md           what a receipt is, and the commit discipline
     <id>.json           one immutable receipt per published run (committed)
+  execution-plan.json   saved run-order snapshot for the Hashing tab; user-authored, not committed
   state.json            UI state, e.g. the last folder used in the hashing tab
   settings.json         settings chosen in the Settings tab
 ```
@@ -210,9 +216,9 @@ the defaults instead of breaking the app.
 | `GET /api/changes` | uncommitted git files inside the workspace folder |
 | `POST /api/agents/:code/link-files` | add paths to that agent's `result_generated_files` |
 | `GET /api/agent-dependencies` | agents plus the edges where one agent's output feeds another's input |
-| `GET /api/execution-plan` | the saved run order for the paths that changed |
+| `GET /api/execution-plan` | the saved run order for the paths that changed, with per-step `done` flags |
 | `POST /api/execution-plan/generate` | rebuild that plan from the current hash view |
-| `PATCH /api/execution-plan` | toggle a step's `done` flag |
+| `PATCH /api/execution-plan` | toggle one or more step `done` flags |
 | `GET /api/hashes` | hash history assembled from the run files |
 | `POST /api/hashes/rebuild` | force a rebuild of the derived index |
 | `GET /api/executions` | execution receipts, each with its status against git |
@@ -229,7 +235,7 @@ the defaults instead of breaking the app.
 ## Project layout
 
 ```
-package.json                  npm scripts and the four dependencies
+package.json                  npm scripts and the runtime dependencies
 data/                         everything the app persists (see above)
 webapp/server.js              express app: static files + API
 webapp/server/
