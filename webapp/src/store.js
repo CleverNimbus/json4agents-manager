@@ -23,7 +23,7 @@ export const store = reactive({
   revision: 0,
 
   agents: {
-    /** Folder holding one JSON file per agent. */
+    /** Folder holding one markdown file per agent. */
     dir: '',
     list: [],
     valid: true,
@@ -31,8 +31,6 @@ export const store = reactive({
     loading: false,
     loaded: false,
   },
-
-  schema: null,
 
   hashes: {
     file: '',
@@ -42,37 +40,10 @@ export const store = reactive({
     /** True while the derived index is being rebuilt. */
     rebuilding: false,
     /**
-     * Bumped every time `loadHashes` finishes, so listeners (e.g. the
-     * execution plan) can re-derive themselves without re-fetching agents.
+     * Bumped every time `loadHashes` finishes, so views that show hash data
+     * can refresh without re-fetching.
      */
     revision: 0,
-  },
-
-  /** Computed producer -> consumer graph for the Agent Dependencies tab. */
-  dependencies: {
-    agents: [],
-    edges: [],
-    loading: false,
-    loaded: false,
-  },
-
-  /** Computed execution order for the Hashing tab (left panel). */
-  executionPlan: {
-    generatedAt: '',
-    changedPaths: [],
-    steps: [],
-    loading: false,
-    loaded: false,
-  },
-
-  /** Published execution receipts from data/executions/ (committed to git). */
-  executions: {
-    configured: false,
-    gitRoot: '',
-    list: [],
-    broken: [],
-    loading: false,
-    loaded: false,
   },
 
   /** Remembered UI choices, persisted in data/state.json. */
@@ -87,6 +58,7 @@ export const store = reactive({
     file: '',
     workspaceFolder: '',
     gitRoot: '',
+    agentsFolder: '',
     hashFolders: [],
     updatedAt: '',
     loaded: false,
@@ -156,18 +128,14 @@ export const clearBanner = () => setBanner('info', '');
  * after the data folder changed, so nothing from the old folder lingers.
  */
 function invalidateDataCaches() {
-  store.schema = null;
   store.agents.loaded = false;
   store.hashes.loaded = false;
-  store.dependencies.loaded = false;
-  store.executionPlan.loaded = false;
-  store.executions.loaded = false;
   store.state.loaded = false;
   store.settings.loaded = false;
 }
 
 /**
- * Re-read agents, schema, hashes, state and settings from the data folder.
+ * Re-read agents, hashes, state and settings from the data folder.
  * Anything that cannot be read is reported: after a folder switch, silently
  * keeping the previous folder's rows would be worse than an error.
  */
@@ -175,11 +143,7 @@ export async function reloadAll() {
   invalidateDataCaches();
   const loaders = [
     ['agents', loadAgents],
-    ['schema', loadSchema],
     ['hashes', loadHashes],
-    ['dependencies', loadDependencies],
-    ['execution-plan', loadExecutionPlan],
-    ['executions', loadExecutions],
     ['state', loadState],
     ['settings', loadSettings],
   ];
@@ -221,12 +185,6 @@ export async function saveDataFolder(value) {
   return store.dataFolder;
 }
 
-export async function loadSchema() {
-  if (store.schema) return store.schema;
-  store.schema = await api.getSchema();
-  return store.schema;
-}
-
 export async function loadAgents() {
   store.agents.loading = true;
   try {
@@ -239,25 +197,6 @@ export async function loadAgents() {
   } finally {
     store.agents.loading = false;
   }
-}
-
-/**
- * Create or update one agent file, then reload the list.
- *
- * @param {{previousCode: string, agent: object}} payload
- *   `previousCode` is empty for a new record. When the code changed, the server
- *   renames the file.
- */
-export async function saveAgent({ previousCode, agent }) {
-  if (previousCode) await api.updateAgent(previousCode, agent);
-  else await api.createAgent(agent);
-  await loadAgents();
-}
-
-/** Delete one agent file, then reload the list. */
-export async function removeAgent(code) {
-  await api.deleteAgent(code);
-  await loadAgents();
 }
 
 export async function loadHashes() {
@@ -274,114 +213,9 @@ export async function loadHashes() {
       generated: data?.generated ?? '',
     };
     store.hashes.loaded = true;
-    // Listeners (e.g. the execution plan panel) derive themselves from the
-    // hashes, so bumping this counter is the signal that the data moved.
     store.hashes.revision += 1;
   } finally {
     store.hashes.loading = false;
-  }
-}
-
-/**
- * Fetch the computed agent dependency graph. The server derives this from each
- * agent's `result_generated_files` and `source_dependant_files`; the client
- * only renders it.
- */
-export async function loadDependencies() {
-  store.dependencies.loading = true;
-  try {
-    const graph = await api.getDependencies();
-    store.dependencies.agents = Array.isArray(graph?.agents) ? graph.agents : [];
-    store.dependencies.edges = Array.isArray(graph?.edges) ? graph.edges : [];
-    store.dependencies.loaded = true;
-  } finally {
-    store.dependencies.loading = false;
-  }
-}
-
-/**
- * Fetch the saved execution plan for the Hashing tab. Returns the empty
- * shape when the file does not exist, so the panel can render its "no
- * plan yet" state.
- */
-export async function loadExecutionPlan() {
-  store.executionPlan.loading = true;
-  try {
-    const plan = await api.getExecutionPlan();
-    store.executionPlan.generatedAt = typeof plan?.generatedAt === 'string' ? plan.generatedAt : '';
-    store.executionPlan.changedPaths = Array.isArray(plan?.changedPaths) ? plan.changedPaths : [];
-    store.executionPlan.steps = Array.isArray(plan?.steps) ? plan.steps : [];
-    store.executionPlan.loaded = true;
-  } finally {
-    store.executionPlan.loading = false;
-  }
-}
-
-/**
- * Recompute the plan from the current hashes + agents and persist it. The
- * response is the new saved plan, with all `done` flags reset to false.
- */
-export async function generateExecutionPlan() {
-  store.executionPlan.loading = true;
-  try {
-    const plan = await api.generateExecutionPlan();
-    store.executionPlan.generatedAt = typeof plan?.generatedAt === 'string' ? plan.generatedAt : '';
-    store.executionPlan.changedPaths = Array.isArray(plan?.changedPaths) ? plan.changedPaths : [];
-    store.executionPlan.steps = Array.isArray(plan?.steps) ? plan.steps : [];
-    store.executionPlan.loaded = true;
-  } finally {
-    store.executionPlan.loading = false;
-  }
-}
-
-/**
- * Persist a `done` toggle for a single step. The local store is updated
- * optimistically so the checkbox reflects the click immediately.
- */
-export async function setExecutionStepDone(code, done) {
-  const steps = store.executionPlan.steps;
-  const step = steps.find((entry) => entry.code === code);
-  if (!step) return;
-  const previous = step.done;
-  if (previous === done) return;
-  step.done = done;
-  try {
-    await api.patchExecutionPlan({ steps: [{ code, done }] });
-  } catch (err) {
-    step.done = previous;
-    throw err;
-  }
-}
-
-/**
- * Read every published execution receipt. The server also checks each one
- * against git and attaches a status: 'valid', 'stale-inputs', 'diverged' or
- * 'unknown' (no workspace configured / git unavailable).
- */
-export async function loadExecutions() {
-  store.executions.loading = true;
-  try {
-    const view = await api.getExecutions();
-    store.executions.configured = view?.configured === true;
-    store.executions.gitRoot = typeof view?.gitRoot === 'string' ? view.gitRoot : '';
-    store.executions.list = Array.isArray(view?.receipts) ? view.receipts : [];
-    store.executions.broken = Array.isArray(view?.broken) ? view.broken : [];
-    store.executions.loaded = true;
-  } finally {
-    store.executions.loading = false;
-  }
-}
-
-/**
- * Publish a receipt for the selected generated files. Errors bubble up to the
- * caller (the Link Changes tab shows them in the banner); the list is
- * refreshed either way so a 409 shows the receipts that already exist.
- */
-export async function publishExecution(agent, paths) {
-  try {
-    return await api.recordExecution(agent, paths);
-  } finally {
-    await loadExecutions().catch(() => {});
   }
 }
 
@@ -484,6 +318,7 @@ export async function loadSettings() {
     store.settings.file = file;
     store.settings.workspaceFolder = settings?.workspaceFolder ?? '';
     store.settings.gitRoot = settings?.gitRoot ?? '';
+    store.settings.agentsFolder = settings?.agentsFolder ?? '';
     store.settings.hashFolders = Array.isArray(settings?.hashFolders) ? settings.hashFolders : [];
     store.settings.updatedAt = settings?.updatedAt ?? '';
   } catch {
@@ -494,15 +329,16 @@ export async function loadSettings() {
 }
 
 /**
- * Store the workspace settings. No feature reads them yet, so they are not
- * checked against the filesystem here - the server enforces the git rules.
+ * Store the workspace settings. The server checks the git rules; the agents
+ * folder only needs to be expandable to a path.
  *
- * @param {{ workspaceFolder: string, gitRoot: string }} patch
+ * @param {{ workspaceFolder: string, gitRoot: string, agentsFolder: string }} patch
  */
 export async function saveSettings(patch) {
   const { settings } = await api.saveSettings(patch);
   store.settings.workspaceFolder = settings.workspaceFolder;
   store.settings.gitRoot = settings.gitRoot;
+  store.settings.agentsFolder = settings.agentsFolder ?? '';
   store.settings.hashFolders = Array.isArray(settings.hashFolders) ? settings.hashFolders : [];
   store.settings.updatedAt = settings.updatedAt;
   store.settings.loaded = true;

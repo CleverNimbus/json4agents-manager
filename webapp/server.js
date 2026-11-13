@@ -6,7 +6,7 @@
  * JSON Manager - local web app server.
  *
  * Serves the browser UI from webapp/ and exposes a small JSON API for the
- * agents file, the local folder explorer and the folder hashing runner.
+ * agents folder, the local folder explorer and the folder hashing runner.
  * Everything stays on this machine; the server binds to 127.0.0.1 by default.
  *
  *   npm start                      # http://127.0.0.1:8000
@@ -18,17 +18,14 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import express from 'express';
-import { appDir, config, files } from './server/config.js';
+import { appDir, config, files, resolveAgentsFolder } from './server/config.js';
 import { agentsRouter } from './server/agentsApi.js';
-import { changesRouter } from './server/changesApi.js';
 import { dataFolderRouter } from './server/dataFolderApi.js';
-import { dependenciesRouter } from './server/dependenciesApi.js';
-import { executionPlanRouter } from './server/executionPlanApi.js';
-import { executionsRouter } from './server/executionsApi.js';
 import { fsRouter } from './server/fsApi.js';
 import { hashRouter } from './server/hashApi.js';
 import { migrateLegacyHashes } from './server/hashesStore.js';
 import { settingsRouter } from './server/settingsApi.js';
+import { readSettings } from './server/settingsStore.js';
 import { stateRouter } from './server/stateApi.js';
 
 const require = createRequire(import.meta.url);
@@ -87,11 +84,7 @@ export function createApp({ host = config.host } = {}) {
   app.use('/src', express.static(path.join(appDir, 'src')));
 
   app.use(agentsRouter);
-  app.use(changesRouter);
   app.use(dataFolderRouter);
-  app.use(dependenciesRouter);
-  app.use(executionPlanRouter);
-  app.use(executionsRouter);
   app.use(fsRouter);
   app.use(hashRouter);
   app.use(stateRouter);
@@ -111,11 +104,11 @@ export function createApp({ host = config.host } = {}) {
 }
 
 /** Log the effective configuration, which is what you check when it misbehaves. */
-function logConfiguration() {
+async function logConfiguration() {
+  const { agentsFolder } = await readSettings();
   console.log(`JSON Manager  ->  http://${config.host}:${config.port}`);
   console.log(`  data dir    : ${config.dataDir}${config.dataDirLocked ? '  (fixed by --data-dir)' : ''}`);
-  console.log(`  agents      : ${files.agentsDir}/*.json`);
-  console.log(`  schema      : ${files.schema}`);
+  console.log(`  agents      : ${resolveAgentsFolder(agentsFolder)}/*.md`);
   console.log(`  hash runs   : ${files.hashesRunsDir}/*.json`);
   if (config.browseRoot) console.log(`  browse root : ${config.browseRoot}`);
 }
@@ -123,7 +116,7 @@ function logConfiguration() {
 export async function startServer() {
   const server = createApp().listen(config.port, config.host);
   await new Promise((resolve) => server.once('listening', resolve));
-  logConfiguration();
+  await logConfiguration();
 
   // One-shot conversion of the old single-file hashes.json into per-run files.
   // Failure must not stop the app: the legacy file simply stays where it is.

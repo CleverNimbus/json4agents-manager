@@ -1014,18 +1014,12 @@ table.grid td.col-remove {
   max-width: none;
 }
 
-/* The Hashing tab splits into a 33% left rail (execution plan) and a 67%
-   right column (the existing view selector + data table). The path toolbar
-   stays full width above the split. */
+/* The Hashing tab's data area. The wrapper survives from the days it shared
+   the row with the execution plan rail; the child simply fills the width now. */
 .hashing-split {
   display: flex;
   gap: 16px;
   align-items: stretch;
-}
-.hashing-left {
-  flex: 1 1 33%;
-  min-width: 220px;
-  max-width: 33%;
 }
 .hashing-right {
   flex: 2 1 67%;

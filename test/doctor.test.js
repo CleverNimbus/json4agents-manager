@@ -5,20 +5,19 @@
 /**
  * Switching the data folder, and the doctor that checks it.
  *
- * Switching is all-or-nothing and has to carry the schema along, because without
- * a schema nothing could be validated. The doctor is the read-only counterpart:
- * it has to notice the states that are valid JSON and still wrong, and exit
- * non-zero so it can gate a commit.
+ * Agents are hand-written markdown in a folder of their own, so switching the
+ * data folder only moves app state - the schema ships with the app. The doctor
+ * is the read-only counterpart: it has to notice the states that are valid
+ * JSON and still wrong, and exit non-zero so it can gate a commit.
  */
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { after, describe, it } from 'node:test';
 
-import { readJson, repoDir, tempDir, useDataFolder, webappDir, withDataFolderPointerPreserved, write } from './helpers.js';
+import { agent, agentMd, readJson, repoDir, tempDir, useDataFolder, webappDir, withDataFolderPointerPreserved, write } from './helpers.js';
 
 const exec = promisify(execFile);
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
@@ -38,17 +37,13 @@ const doctor = async (dataDir, extra = []) => {
 const findings = async (dataDir) => JSON.parse((await doctor(dataDir, ['--json'])).stdout).findings;
 const areas = (list) => list.filter((f) => f.level === 'error').map((f) => `${f.area}: ${f.message}`);
 
-/** A data folder with a schema and three valid agents. */
+/** A data folder whose settings point at two valid agent files. */
 async function healthyData(label = 'doctor') {
-  const dir = await useDataFolder({ label });
-  for (const code of ['AG-001', 'AG-002']) {
-    await write(path.join(dir, 'agents', `${code}.json`), { code, name: code, phase: 1 });
-  }
-  return dir;
+  return useDataFolder({ label, agents: [agent('AG-001'), agent('AG-002')] });
 }
 
 describe('PUT /api/data-folder', () => {
-  it('moves the app to another folder, creating what it needs', async () => {
+  it('moves the app to another folder', async () => {
     await withDataFolderPointerPreserved(async () => {
       const { startApp } = await import('./helpers.js');
       const api = await startApp();
@@ -58,27 +53,7 @@ describe('PUT /api/data-folder', () => {
 
         assert.equal(status, 200);
         assert.equal(body.dataDir, target);
-        assert.deepEqual((await readJson(path.join(target, 'agents.schema.json'))).title, 'Agents', 'the schema came along');
-        assert.ok((await fs.stat(path.join(target, 'agents'))).isDirectory());
-
-        const { body: agents } = await api.get('/api/agents');
-        assert.equal(agents.dir, path.join(target, 'agents'), 'every tab now reads the new folder');
-      } finally {
-        await api.close();
-      }
-    });
-  });
-
-  it('keeps a schema the new folder already has', async () => {
-    await withDataFolderPointerPreserved(async () => {
-      const { startApp } = await import('./helpers.js');
-      const api = await startApp();
-      try {
-        const target = await tempDir('switch-own-schema');
-        await write(path.join(target, 'agents.schema.json'), { title: 'Something else', $defs: { agent: {} } });
-
-        await api.put('/api/data-folder', { dataFolder: target });
-        assert.equal((await readJson(path.join(target, 'agents.schema.json'))).title, 'Something else');
+        assert.equal((await api.get('/api/data-folder')).resolved, target, 'every tab now reads the new folder');
       } finally {
         await api.close();
       }
@@ -95,24 +70,6 @@ describe('PUT /api/data-folder', () => {
         assert.equal(status, 200);
         assert.equal(body.isDefault, true);
         assert.equal(body.value, '');
-      } finally {
-        await api.close();
-      }
-    });
-  });
-
-  it('refuses a folder it cannot use and stays where it was', async () => {
-    await withDataFolderPointerPreserved(async () => {
-      const { startApp } = await import('./helpers.js');
-      const api = await startApp();
-      try {
-        const before = (await api.get('/api/data-folder')).resolved;
-        const blocker = await tempDir('blocked');
-        await fs.writeFile(path.join(blocker, 'agents'), 'I am a file, not a folder');
-
-        const { status } = await api.put('/api/data-folder', { dataFolder: blocker });
-        assert.equal(status, 400);
-        assert.equal((await api.get('/api/data-folder')).resolved, before, 'the previous folder is still in use');
       } finally {
         await api.close();
       }
@@ -140,72 +97,35 @@ describe('npm run doctor', () => {
     assert.match(stdout, /No problems found|0 error\(s\)/);
   });
 
-  it('reports a folder with nothing in it without failing', async () => {
+  it('reports an agents folder that does not exist', async () => {
     const dir = await tempDir('empty-doctor');
+    await write(path.join(dir, 'settings.json'), { agentsFolder: path.join(dir, 'agents') });
     const { code } = await doctor(dir);
-    assert.equal(code, 1, 'a missing schema is an error');
-    assert.match(areas(await findings(dir)).join('\n'), /agents\.schema\.json is missing/);
-  });
-
-  it('reports an agent whose code disagrees with its file name', async () => {
-    const dir = await healthyData();
-    await write(path.join(dir, 'agents', 'AG-777.json'), { code: 'AG-001', name: 'Impostor', phase: 1 });
-
-    const list = await findings(dir);
-    assert.ok(areas(list).some((line) => /AG-777\.json/.test(line) && /AG-001/.test(line)));
-    assert.equal((await doctor(dir)).code, 1);
+    assert.equal(code, 1, 'agents that cannot be read are an error');
+    assert.match(areas(await findings(dir)).join('\n'), /agents folder does not exist/);
   });
 
   it('reports codes that collide ignoring case', async () => {
     const dir = await healthyData();
-    await write(path.join(dir, 'agents', 'ag-001.json'), { code: 'ag-001', name: 'Lower twin', phase: 1 });
+    await write(path.join(dir, 'agents', 'ag-001.md'), agentMd(agent('ag-001')));
     assert.ok(areas(await findings(dir)).some((line) => /collides with AG-001 ignoring case/.test(line)));
   });
 
   it('reports a broken agent file, naming it', async () => {
     const dir = await healthyData();
-    await write(path.join(dir, 'agents', 'AG-004.json'), '{ not json');
-    assert.ok(areas(await findings(dir)).some((line) => /^agents: .*JSON/.test(line)));
+    await write(path.join(dir, 'agents', 'AG-004.md'), '---\nexecution_mode: [oops\n---\nbody');
+    const list = await findings(dir);
+    assert.ok(list.some((f) => f.level === 'error' && f.detail === 'AG-004.md'), areas(list).join('\n'));
   });
 
   it('reports a record that does not match the schema, with the field', async () => {
     const dir = await healthyData();
-    await write(path.join(dir, 'agents', 'AG-005.json'), { code: 'AG-005', name: 'Bad', phase: 'one' });
-    assert.ok(areas(await findings(dir)).some((line) => /AG-005 does not match the schema/.test(line)));
-  });
-
-  it('reports a set valued field that holds a duplicate or is unsorted', async () => {
-    const dir = await healthyData();
-    await write(path.join(dir, 'agents', 'AG-006.json'), {
-      code: 'AG-006',
-      name: 'Messy',
-      phase: 1,
-      result_generated_files: ['b.txt', 'a.txt', 'a.txt'],
-    });
-    const warnings = (await findings(dir)).filter((f) => f.level === 'warning').map((f) => f.message);
-    assert.ok(warnings.some((m) => /result_generated_files contains duplicate entries/.test(m)));
-    assert.ok(warnings.some((m) => /result_generated_files is not sorted/.test(m)));
-  });
-
-  it('reports an absolute or escaping path in an agent record', async () => {
-    const dir = await healthyData();
-    await write(path.join(dir, 'agents', 'AG-007.json'), {
-      code: 'AG-007',
-      name: 'Escaper',
-      phase: 1,
-      result_generated_files: ['/etc/passwd'],
-      source_dependant_files: ['../outside.txt'],
-    });
-    const errors = areas(await findings(dir));
-    assert.ok(errors.some((line) => /AG-007\.result_generated_files holds an absolute path/.test(line)));
-    assert.ok(errors.some((line) => /AG-007\.source_dependant_files escapes the git root/.test(line)));
-  });
-
-  it('reports a parent that does not exist, as a warning', async () => {
-    const dir = await healthyData();
-    await write(path.join(dir, 'agents', 'AG-008.json'), { code: 'AG-008', name: 'Orphan', phase: 1, parent: 'NOPE' });
-    const warnings = (await findings(dir)).filter((f) => f.level === 'warning').map((f) => f.message);
-    assert.ok(warnings.some((m) => /parent "NOPE", which does not exist/.test(m)));
+    await write(path.join(dir, 'agents', 'AG-005.md'), agentMd(agent('AG-005', { execution_mode: 'sideways' })));
+    const list = await findings(dir);
+    assert.ok(
+      list.some((f) => f.level === 'error' && f.detail === 'AG-005.md' && /does not match the agent schema/.test(f.message) && /execution_mode/.test(f.message)),
+      areas(list).join('\n'),
+    );
   });
 
   it('reports a run file that cannot be read', async () => {
@@ -295,64 +215,9 @@ describe('npm run doctor', () => {
 
   it('reports incomplete workspace settings', async () => {
     const dir = await healthyData();
-    await write(path.join(dir, 'settings.json'), { workspaceFolder: '/tmp' });
+    await write(path.join(dir, 'settings.json'), { workspaceFolder: '/tmp', agentsFolder: path.join(dir, 'agents') });
     const warnings = (await findings(dir)).filter((f) => f.level === 'warning').map((f) => f.message);
     assert.ok(warnings.some((m) => /workspace settings are incomplete/.test(m)));
-  });
-
-  it('notes that no receipts are recorded yet', async () => {
-    const dir = await healthyData();
-    const notes = (await findings(dir)).map((f) => f.message);
-    assert.ok(notes.some((m) => /No execution receipts recorded yet/.test(m)));
-  });
-
-  it('reports a receipt that cannot be read', async () => {
-    const dir = await healthyData();
-    await write(path.join(dir, 'executions', 'garbage.json'), '{ not json');
-    assert.ok(areas(await findings(dir)).some((line) => /Receipt .*garbage\.json cannot be read/.test(line)));
-  });
-
-  it('warns about a receipt naming an agent that does not exist', async () => {
-    const dir = await healthyData();
-    await write(path.join(dir, 'executions', '2026-01-01T00-00-00-000Z_x.json'), {
-      id: '2026-01-01T00-00-00-000Z_x',
-      agent: 'NOPE',
-      recordedAt: '2026-01-01T00:00:00.000Z',
-      inputs: [],
-      outputs: [{ path: 'out/a.md', blob: 'a'.repeat(40), sha256: sha256('a') }],
-    });
-    const warnings = (await findings(dir)).filter((f) => f.level === 'warning').map((f) => f.message);
-    assert.ok(warnings.some((m) => /names agent NOPE, which does not exist/.test(m)));
-  });
-
-  it('reports an absolute path inside a receipt', async () => {
-    const dir = await healthyData();
-    await write(path.join(dir, 'executions', '2026-01-01T00-00-00-000Z_x.json'), {
-      id: '2026-01-01T00-00-00-000Z_x',
-      agent: 'AG-001',
-      recordedAt: '2026-01-01T00:00:00.000Z',
-      inputs: [],
-      outputs: [{ path: '/etc/shadow', blob: 'a'.repeat(40), sha256: sha256('a') }],
-    });
-    assert.ok(areas(await findings(dir)).some((line) => /holds an absolute path/.test(line)));
-  });
-
-  it('reports the same output published twice under unchanged inputs', async () => {
-    const dir = await healthyData();
-    const inputs = [{ path: 'src/input.txt', blob: 'b'.repeat(40), sha256: sha256('in') }];
-    for (const [id, hash] of [
-      ['2026-01-01T00-00-00-000Z_1', sha256('first')],
-      ['2026-01-02T00-00-00-000Z_2', sha256('second')],
-    ]) {
-      await write(path.join(dir, 'executions', `${id}.json`), {
-        id,
-        agent: 'AG-001',
-        recordedAt: '2026-01-01T00:00:00.000Z',
-        inputs,
-        outputs: [{ path: 'out/report.md', blob: 'c'.repeat(40), sha256: hash }],
-      });
-    }
-    assert.ok(areas(await findings(dir)).some((line) => /changed under unchanged inputs/.test(line)));
   });
 
   it('says which folder it looked at, and can be read as JSON', async () => {
@@ -360,7 +225,6 @@ describe('npm run doctor', () => {
     const report = JSON.parse((await doctor(dir, ['--json'])).stdout);
     assert.equal(report.dataDir, dir);
     assert.equal(report.agents, 2);
-    assert.equal(report.receipts, 0);
     assert.ok(Array.isArray(report.findings));
   });
 });

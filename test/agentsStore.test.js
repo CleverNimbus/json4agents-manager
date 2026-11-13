@@ -3,13 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 /**
- * The agent store: one file per record, with the file name as the agent's
- * identity.
+ * The agent store: one markdown file per agent in the configured folder, with
+ * the file name stem as the agent's identity.
  *
- * The rules under test are the ones that keep two machines from stepping on each
- * other: a code must be safe to turn into a path, a file whose content disagrees
- * with its name is refused rather than loaded, and the grid order is the code
- * order no matter what the filesystem hands back.
+ * The rules under test are the ones that keep hand-written files honest: a code
+ * must be safe to turn into a path, a file whose frontmatter does not satisfy
+ * the schema is reported as an issue instead of becoming a row, and the grid
+ * order is the code order no matter what the filesystem hands back. The store
+ * never writes: there is nothing here to create, update or delete.
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -18,25 +19,25 @@ import { beforeEach, describe, it } from 'node:test';
 
 import {
   AgentStoreError,
-  agentExists,
+  agentsDir,
   assertValidCode,
-  createAgent,
-  deleteAgent,
   fileNameFor,
   listAgents,
   readAgent,
   scanAgents,
-  updateAgent,
 } from '../webapp/server/agentsStore.js';
-import { agent, listNames, useDataFolder, write } from './helpers.js';
+import { defaultAgentsDir } from '../webapp/server/config.js';
+import { agent, agentMd, useDataFolder, write } from './helpers.js';
 
 let dir;
+let agentsPath;
 
 beforeEach(async () => {
   dir = await useDataFolder();
+  agentsPath = path.join(dir, 'agents');
 });
 
-const codes = () => listNames(path.join(dir, 'agents'));
+const md = agentMd;
 
 describe('assertValidCode', () => {
   it('accepts ordinary agent codes', () => {
@@ -73,101 +74,105 @@ describe('assertValidCode', () => {
   });
 
   it('carries the code into the file name it allows', () => {
-    assert.equal(fileNameFor('AG-001'), 'AG-001.json');
+    assert.equal(fileNameFor('AG-001'), 'AG-001.md');
   });
 });
 
-describe('createAgent', () => {
-  it('writes one file named after the code', async () => {
-    await createAgent(agent('AG-001', { name: 'First' }));
-    assert.deepEqual(await codes(), ['AG-001.json']);
-    assert.deepEqual(await readAgent('AG-001'), agent('AG-001', { name: 'First' }));
+describe('agentsDir', () => {
+  it('follows the agentsFolder setting', async () => {
+    assert.equal(await agentsDir(), agentsPath);
   });
 
-  it('refuses to overwrite an existing agent with 409', async () => {
-    await createAgent(agent('AG-001'));
-    await assert.rejects(() => createAgent(agent('AG-001', { name: 'Other' })), { status: 409 });
-    assert.deepEqual(await readAgent('AG-001'), agent('AG-001'), 'the stored record must be untouched');
-  });
-
-  it('creates the folder when it is missing', async () => {
-    await fs.rm(path.join(dir, 'agents'), { recursive: true, force: true });
-    await createAgent(agent('AG-001'));
-    assert.deepEqual(await codes(), ['AG-001.json']);
-  });
-
-  it('writes valid JSON with a trailing newline', async () => {
-    await createAgent(agent('AG-001'));
-    const text = await fs.readFile(path.join(dir, 'agents', 'AG-001.json'), 'utf8');
-    assert.ok(text.endsWith('}\n'), 'expected pretty printed JSON ending in a newline');
+  it('falls back to the repo agents folder when the setting is empty', async () => {
+    await write(path.join(dir, 'settings.json'), { agentsFolder: '' });
+    assert.equal(await agentsDir(), defaultAgentsDir);
   });
 });
 
-describe('scanAgents - identity', () => {
-  it('refuses a file whose code disagrees with its name', async () => {
-    await write(path.join(dir, 'agents', 'AG-777.json'), agent('AG-001', { name: 'Impostor' }));
+describe('scanAgents - validity', () => {
+  it('loads a file whose frontmatter matches the schema', async () => {
+    await write(path.join(agentsPath, 'AG-001.md'), md(agent('AG-001')));
     const { records, issues } = await scanAgents();
-    assert.deepEqual(records, [], 'an impostor must not appear as a row');
-    assert.equal(issues.length, 1);
-    assert.match(issues[0].message, /AG-777\.json/);
-    assert.match(issues[0].message, /AG-001/, 'the message must name both sides of the disagreement');
+    assert.deepEqual(issues, []);
+    assert.equal(records.length, 1);
+    assert.equal(records[0].code, 'AG-001');
+    assert.equal(records[0].agent.execution_mode, 'full_input_processing');
   });
 
-  it('refuses a file that is not valid JSON, and says which file', async () => {
-    await write(path.join(dir, 'agents', 'AG-004.json'), '{ broken');
+  it('uses the file name as the code, whatever the frontmatter claims', async () => {
+    await write(path.join(agentsPath, 'AG-777.md'), md(agent('AG-001')));
+    const { records, issues } = await scanAgents();
+    assert.deepEqual(issues, [], 'a stray code key is not a disagreement to report');
+    assert.equal(records[0].code, 'AG-777');
+    assert.equal(records[0].agent.code, 'AG-777');
+  });
+
+  it('reports frontmatter that does not match the schema and drops the row', async () => {
+    await write(path.join(agentsPath, 'AG-002.md'), md(agent('AG-002', { execution_mode: 'sometimes' })));
     const { records, issues } = await scanAgents();
     assert.deepEqual(records, []);
     assert.equal(issues.length, 1);
-    assert.equal(issues[0].file, 'AG-004.json');
+    assert.equal(issues[0].file, 'AG-002.md');
+    assert.match(issues[0].message, /schema/);
   });
 
-  it('refuses a record with no code', async () => {
-    await write(path.join(dir, 'agents', 'AG-005.json'), { name: 'No code', phase: 1 });
+  it('reports a file with no frontmatter', async () => {
+    await write(path.join(agentsPath, 'AG-003.md'), '# just a heading\n');
     const { records, issues } = await scanAgents();
     assert.deepEqual(records, []);
-    assert.match(issues[0].message, /code/);
+    assert.equal(issues.length, 1);
+  });
+
+  it('reports broken YAML without taking the whole folder down', async () => {
+    await write(path.join(agentsPath, 'AG-004.md'), md(agent('AG-004')));
+    await write(path.join(agentsPath, 'AG-005.md'), '---\n: : :\n---\nbody\n');
+    const { records, issues } = await scanAgents();
+    assert.deepEqual(records.map((r) => r.code), ['AG-004'], 'the good file must still be listed');
+    assert.equal(issues.length, 1);
+    assert.equal(issues[0].file, 'AG-005.md');
   });
 
   it('reports codes that collide when case is ignored', async () => {
-    await write(path.join(dir, 'agents', 'AG-006.json'), agent('AG-006'));
-    await write(path.join(dir, 'agents', 'ag-006.json'), agent('ag-006'));
+    await write(path.join(agentsPath, 'AG-006.md'), md(agent('AG-006')));
+    await write(path.join(agentsPath, 'ag-006.md'), md(agent('ag-006')));
     const { issues } = await scanAgents();
     assert.equal(issues.length, 1);
-    assert.match(issues[0].message, /AG-006/);
+    assert.match(issues[0].message, /collides/i);
   });
 
-  it('ignores files that are not .json', async () => {
-    await write(path.join(dir, 'agents', 'notes.txt'), 'hello');
-    await write(path.join(dir, 'agents', 'README.md'), '# hi');
-    await createAgent(agent('AG-001'));
+  it('reports a file name that is not a valid code', async () => {
+    await write(path.join(agentsPath, 'has space.md'), md(agent('AG-001')));
+    const { records, issues } = await scanAgents();
+    assert.deepEqual(records, []);
+    assert.equal(issues.length, 1);
+    assert.match(issues[0].message, /valid agent code/);
+  });
+
+  it('ignores files that are not .md', async () => {
+    await write(path.join(agentsPath, 'notes.txt'), 'hello');
+    await write(path.join(agentsPath, 'AG-001.json'), '{}');
+    await write(path.join(agentsPath, 'AG-001.md'), md(agent('AG-001')));
     const { records, issues } = await scanAgents();
     assert.deepEqual(records.map((r) => r.code), ['AG-001']);
     assert.deepEqual(issues, []);
   });
 
   it('ignores sub folders', async () => {
-    await fs.mkdir(path.join(dir, 'agents', 'archive.json'), { recursive: true });
-    await createAgent(agent('AG-001'));
+    await fs.mkdir(path.join(agentsPath, 'archive.md'), { recursive: true });
+    await write(path.join(agentsPath, 'AG-001.md'), md(agent('AG-001')));
     const { records, issues } = await scanAgents();
     assert.deepEqual(records.map((r) => r.code), ['AG-001']);
     assert.deepEqual(issues, []);
   });
 });
 
-describe('scanAgents - order', () => {
+describe('scanAgents - order and missing folder', () => {
   it('orders by code, whatever order the files were created in', async () => {
-    await createAgent(agent('M-003'));
-    await createAgent(agent('A-001'));
-    await createAgent(agent('Z-009'));
-    await createAgent(agent('B-002'));
+    for (const code of ['M-003', 'A-001', 'Z-009', 'B-002']) {
+      await write(path.join(agentsPath, `${code}.md`), md(agent(code)));
+    }
     const { records } = await scanAgents();
     assert.deepEqual(records.map((r) => r.code), ['A-001', 'B-002', 'M-003', 'Z-009']);
-  });
-
-  it('does not depend on the filesystem handing back a sorted directory', async () => {
-    for (const code of ['zz', 'aa', 'MM', 'bb']) await write(path.join(dir, 'agents', `${code}.json`), agent(code));
-    const { records } = await scanAgents();
-    assert.deepEqual(records.map((r) => r.code), ['aa', 'bb', 'MM', 'zz']);
   });
 
   it('returns an empty list when the agents folder is empty', async () => {
@@ -175,87 +180,52 @@ describe('scanAgents - order', () => {
     assert.deepEqual(records, []);
     assert.deepEqual(issues, []);
   });
-});
 
-describe('updateAgent', () => {
-  it('updates in place when the code is unchanged', async () => {
-    await createAgent(agent('AG-001'));
-    await updateAgent('AG-001', agent('AG-001', { name: 'Renamed by content' }));
-    assert.deepEqual(await codes(), ['AG-001.json']);
-    assert.equal((await readAgent('AG-001')).name, 'Renamed by content');
-  });
-
-  it('renames the file when the code changes, leaving nothing behind', async () => {
-    await createAgent(agent('AG-001', { notes: 'keep me' }));
-    await updateAgent('AG-001', agent('AG-002', { notes: 'keep me' }));
-    assert.deepEqual(await codes(), ['AG-002.json']);
-    assert.equal((await readAgent('AG-002')).notes, 'keep me', 'content must survive the rename');
-  });
-
-  it('refuses to rename onto a code that already exists', async () => {
-    await createAgent(agent('AG-001'));
-    await createAgent(agent('AG-002'));
-    await assert.rejects(() => updateAgent('AG-001', agent('AG-002')), { status: 409 });
-    assert.deepEqual(await codes(), ['AG-001.json', 'AG-002.json']);
-  });
-
-  it('reports a missing record as 404', async () => {
-    await assert.rejects(() => updateAgent('AG-999', agent('AG-999')), { status: 404 });
-  });
-
-  it('refuses a new code that is not a valid code', async () => {
-    await createAgent(agent('AG-001'));
-    await assert.rejects(() => updateAgent('AG-001', agent('../escape')), AgentStoreError);
-    assert.deepEqual(await codes(), ['AG-001.json']);
+  it('reports a missing agents folder instead of throwing', async () => {
+    await fs.rm(agentsPath, { recursive: true, force: true });
+    const { records, issues } = await scanAgents();
+    assert.deepEqual(records, []);
+    assert.equal(issues.length, 1);
+    assert.equal(issues[0].file, agentsPath);
+    assert.match(issues[0].message, /does not exist/);
   });
 });
 
 describe('readAgent', () => {
+  it('returns the frontmatter, the code and the body', async () => {
+    await write(path.join(agentsPath, 'AG-001.md'), md(agent('AG-001'), 'read me'));
+    const { file, agent: record } = await readAgent('AG-001');
+    assert.equal(file, path.join(agentsPath, 'AG-001.md'));
+    assert.equal(record.code, 'AG-001');
+    assert.equal(record.execution_mode, 'full_input_processing');
+    assert.match(record.body, /read me/);
+  });
+
   it('reports a missing record as 404', async () => {
     await assert.rejects(() => readAgent('AG-404'), { status: 404 });
   });
 
   it('reports a broken file as a server error naming the file', async () => {
-    await write(path.join(dir, 'agents', 'AG-001.json'), '{ broken');
+    await write(path.join(agentsPath, 'AG-001.md'), md(agent('AG-001', { execution_mode: 'sometimes' })));
     await assert.rejects(
       () => readAgent('AG-001'),
-      (err) => err.status === 500 && err.message.includes('AG-001.json'),
+      (err) => err.status === 500 && err.message.includes('AG-001.md'),
     );
   });
-});
 
-describe('deleteAgent', () => {
-  it('removes the file', async () => {
-    await createAgent(agent('AG-001'));
-    await createAgent(agent('AG-002'));
-    assert.equal(await deleteAgent('AG-001'), 'AG-001');
-    assert.deepEqual(await codes(), ['AG-002.json']);
-  });
-
-  it('reports a missing record as 404', async () => {
-    await assert.rejects(() => deleteAgent('AG-404'), { status: 404 });
-  });
-});
-
-describe('agentExists', () => {
-  it('is false for a code that cannot be turned into a path', async () => {
-    assert.equal(await agentExists('../escape'), false, 'a traversal attempt is not an existing agent');
-  });
-
-  it('is true only when the file is really there', async () => {
-    await createAgent(agent('AG-001'));
-    assert.equal(await agentExists('AG-001'), true);
-    assert.equal(await agentExists('AG-002'), false);
+  it('refuses a code that cannot be turned into a path', async () => {
+    await assert.rejects(() => readAgent('../escape'), AgentStoreError);
   });
 });
 
 describe('listAgents', () => {
   it('returns plain records plus the issues, sorted by code', async () => {
-    await write(path.join(dir, 'agents', 'AG-777.json'), agent('AG-001'));
-    await createAgent(agent('AG-002'));
-    await createAgent(agent('AG-001'));
+    await write(path.join(agentsPath, 'AG-002.md'), md(agent('AG-002')));
+    await write(path.join(agentsPath, 'AG-001.md'), md(agent('AG-001')));
+    await write(path.join(agentsPath, 'AG-003.md'), '# no frontmatter\n');
     const { records, issues } = await listAgents();
     assert.deepEqual(records.map((r) => r.code), ['AG-001', 'AG-002']);
-    assert.equal(issues.length, 1, 'the impostor is reported, not loaded');
+    assert.equal(records[0].body !== undefined, true, 'the list must carry full records');
+    assert.equal(issues.length, 1, 'the bad file is reported, not loaded');
   });
 });

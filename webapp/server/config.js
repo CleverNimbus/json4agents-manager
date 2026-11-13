@@ -9,10 +9,12 @@
  * The app files (index.html, src/, styles.css) live in webapp/; everything the
  * app persists lives in the data directory, which defaults to <repo>/data:
  *
- *   data/agents.schema.json   the schema every agent file is validated against
- *   data/agents/<CODE>.json   one file per agent record
  *   data/hashes/runs/*.json   one immutable file per hash run
  *   data/hashes/index.json    derived cache, rebuilt when it does not match
+ *
+ * Agents are read-only markdown files in the agents folder: the settings key
+ * `agentsFolder`, default <repo>/agents. Their frontmatter schema ships with
+ * the app in webapp/server/schemas/.
  */
 import os from 'node:os';
 import path from 'node:path';
@@ -112,10 +114,21 @@ export function resolveDataFolder(value) {
   return raw === '' ? defaultDataDir : expand(raw);
 }
 
+export const defaultAgentsDir = path.join(repoDir, 'agents');
+
+/**
+ * The agents folder from Settings, expanded like a data folder; an empty
+ * setting means <repo>/agents. It lives outside the data folder on purpose:
+ * agent files are hand-written sources, not app state.
+ */
+export function resolveAgentsFolder(value) {
+  const raw = String(value ?? '').trim();
+  return raw === '' ? defaultAgentsDir : expand(raw);
+}
+
 /**
  * Point the app at another data folder. Everything below resolves `files`
- * lazily, so this takes effect immediately; the caller is responsible for
- * dropping caches (see resetSchemaCache in validate.js).
+ * lazily, so this takes effect immediately.
  */
 export function setDataDir(next) {
   config.dataDir = resolveDataFolder(next);
@@ -153,12 +166,6 @@ export function dataFolderSetting() {
 
 /** Absolute paths of everything the app reads or writes, resolved on access. */
 export const files = {
-  get agentsDir() {
-    return path.join(config.dataDir, 'agents');
-  },
-  get schema() {
-    return path.join(config.dataDir, 'agents.schema.json');
-  },
   get hashes() {
     return path.join(config.dataDir, 'hashes.json');
   },
@@ -177,13 +184,5 @@ export const files = {
   },
   get settings() {
     return path.join(config.dataDir, 'settings.json');
-  },
-  /** Execution plan for the Hashing tab. User-authored, never committed. */
-  get executionPlan() {
-    return path.join(config.dataDir, 'execution-plan.json');
-  },
-  /** Execution receipts: one immutable file per published run, committed to git. */
-  get executionsDir() {
-    return path.join(config.dataDir, 'executions');
   },
 };

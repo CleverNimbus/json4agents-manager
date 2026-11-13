@@ -13,23 +13,18 @@
  * data-location.json next to package.json. Precedence on startup is
  * --data-dir / JSONM_DATA_DIR > this setting > <repo>/data.
  *
- * Switching is all-or-nothing: the target is prepared first (folder created, a
- * missing schema carried over), and only then does the app move. A failure
- * leaves the previous folder in use.
+ * Switching only re-points the app; the folders below it are created by
+ * whichever store needs them. (Agent files are not data-folder state: they
+ * live in the agents folder configured in settings.json.)
  */
 import { Router } from 'express';
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import {
   config,
   dataFolderSetting,
   defaultDataDir,
-  resolveDataFolder,
   setDataDir,
   writeDataFolderPointer,
 } from './config.js';
-import { fileExists } from './store.js';
-import { resetSchemaCache } from './validate.js';
 
 export const dataFolderRouter = Router();
 
@@ -51,26 +46,9 @@ dataFolderRouter.put('/api/data-folder', async (req, res) => {
 
   const raw = String(dataFolder ?? '').trim();
   const previous = config.dataDir;
-  const target = resolveDataFolder(raw);
-
-  try {
-    await fs.mkdir(path.join(target, 'agents'), { recursive: true });
-
-    // Carry the schema along when the new folder has none: without it nothing
-    // could be validated. A folder that brings its own schema keeps it.
-    const targetSchema = path.join(target, 'agents.schema.json');
-    if (!(await fileExists(targetSchema))) {
-      const currentSchema = path.join(previous, 'agents.schema.json');
-      if (await fileExists(currentSchema)) await fs.copyFile(currentSchema, targetSchema);
-    }
-  } catch (err) {
-    setDataDir(previous);
-    return res.status(400).json({ error: `Cannot use ${target} as the data folder: ${err.message}` });
-  }
 
   setDataDir(raw);
   writeDataFolderPointer(raw);
-  resetSchemaCache();
 
   return res.json({ ok: true, ...dataFolderSetting(), dataDir: config.dataDir, previousDir: previous, defaultDir: defaultDataDir });
 });

@@ -3,14 +3,14 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](https://nodejs.org)
 
-A local web app for keeping track of agents and the files they touch: browse and
-edit agent records, hash a folder to see exactly what changed since the last run,
-link uncommitted git files to the agent that produced them, and record an
-execution so a teammate never pays for the same generation twice.
+A local web app for keeping track of the agents you run over a workspace: browse
+the agent files in your agents folder, hash a folder to see exactly what changed
+since the last run, and keep the app's settings and hash history in a data folder
+of your choosing.
 
-Built for anyone running multiple agents over the same workspace: the records
-live as plain JSON in git, the hash store survives a two-user merge, and nothing
-leaves your machine.
+Built for anyone running multiple agents over the same workspace: the agents are
+hand-written markdown that lives in git, the hash store survives a two-user
+merge, and nothing leaves your machine.
 
 <!--
 Add a screenshot or GIF here, e.g.:
@@ -42,45 +42,31 @@ Node 22 or newer. No build step, no bundler; the app keeps its runtime dependenc
 
 ## Features
 
-**Agents** - one JSON file per record under `data/agents/`, ordered by code. Add,
-edit and delete from a schema-generated popup; changing a code renames the file.
-A file whose content disagrees with its name is reported rather than loaded.
+**Agents** - one markdown file per agent in the agents folder: the file-name stem
+is the code, the YAML frontmatter describes the agent (execution mode, input
+sources, information outputs, generated document types) and the body is the
+document itself. The app reads these files and never writes them - you edit them
+in your editor, next to the code they describe. The folder itself is a setting
+(default `agents/` next to `package.json`), so agents can live wherever your
+git repository does.
 
 **Hashing** - point it at a folder and it writes SHA-256 for every file and a
 rolled-up hash for every folder, with live progress and cancel. Yellow dot marks
 rows whose content changed; click one for its full history. Re-hashing an
 unchanged tree records almost nothing.
 
-**Link Changes to Agent** - the uncommitted files in your workspace, from
-`git status`, with checkboxes and an agent picker. Each row already says which
-agents consume or produce that path. *Link as output* writes the selection into
-the agent's `result_generated_files` as `folder/*` references; *Link as input*
-writes the exact paths into `source_dependant_files`, which is what an
-execution receipt reads. The same selection can be recorded as an execution.
+**Settings** - where the workspace is, where its git root is, where the agents
+folder is, where the data folder lives, and which folders hashing remembers.
+Saving reloads everything that depends on it.
 
-**Execution plan** - after hashing, the app can rebuild an ordered run plan from
-the changed paths: an agent is a root when a changed path overlaps one of its
-outputs **or** one of its inputs, so an edited input triggers the agents that
-read it even when nothing generates that file. The plan is stored in
-`data/execution-plan.json`, where each step records whether it is done and can
-be regenerated at any time from the current hash view.
-
-**Executions** - a receipt per published run: the git blob and SHA-256 of the
-selected outputs and of the agent's `source_dependant_files`, in one immutable
-file under `data/executions/` that you commit with the outputs. A teammate who
-pulls it sees the work is done; a hand-edited output or an unpushed run is not a
-receipt.
-
-**Settings** - where the workspace is, where its git root is, and where the data
-folder lives. Saving reloads everything that depends on it.
-
-**`npm run doctor`** - read-only integrity checks over a data folder, exit code
-`1` on error, so it can gate a commit.
+**`npm run doctor`** - read-only integrity checks over the data folder and the
+agents folder, exit code `1` on error, so it can gate a commit.
 
 ## How it works
 
-**One file per record.** Two agents can never overwrite each other, and a single
-record diffs, reviews and merges on its own.
+**One file per agent.** Agents are plain markdown, so they diff, review and
+merge on their own, two people can never overwrite each other's agent, and
+`git log AG-001.md` is the agent's changelog.
 
 **One immutable file per hash run.** A run writes a new file under
 `data/hashes/runs/` and never edits an old one; it records only the paths whose
@@ -89,21 +75,16 @@ once produce two files that git merges without a conflict. "Which hash is
 current" is computed from the run files, never stored - so a merge cannot make
 the grid show a stale hash as current.
 
-**One immutable file per execution receipt.** Recording a run writes a new file
-under `data/executions/` holding the git blob and SHA-256 of the outputs and of
-the agent's inputs; it is committed with the outputs, so two people recording at
-once add two files that merge cleanly instead of fighting over one document. The
-content is read from the git index, never a dirty working tree, and republishing
-the same outputs for unchanged inputs is refused - a hand-edited output is not a
-new execution.
+**Plain files, no lock-in.** Everything the app reads or persists is a file on
+disk ([data layout](#data-layout)); hashing uses `node:crypto`, and the browser
+UI needs no file system permissions of its own. No account, no sync, no
+telemetry.
 
-**Plain files, no lock-in.** Everything the app persists is JSON on disk
-([data layout](#data-layout)); hashing uses `node:crypto`, and the browser UI
-needs no file system permissions of its own. No account, no sync, no telemetry.
-
-**A shared schema.** Every write is validated against `data/agents.schema.json`
-(JSON Schema draft 2020-12), which also generates the edit form - fields, types
-and required markers follow the schema, not hard-coded UI.
+**A bundled schema.** Frontmatter is validated against
+`webapp/server/schemas/agent.frontmatter.schema.json` (JSON Schema draft
+2020-12) when a file is read. The schema ships with the app, not with the data,
+so switching folders cannot break validation and the server is the only place
+that knows the rules.
 
 ## Options
 
@@ -128,54 +109,49 @@ npm test
 `node:test`, ships with Node - no extra dependency. The suite runs the real
 server on an ephemeral port against a throwaway data folder under the OS temp
 dir; **nothing ever touches `data/`**. It also replays a real two-user
-`git merge` - for the hash store and for execution receipts - inside real
-repositories under the temp dir. See
+`git merge` for the hash store inside real repositories under the temp dir. See
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) section 12 for how the suite is
 wired.
 
 ## `npm run doctor`
 
 ```bash
-npm run doctor                              # check the data folder
+npm run doctor                              # check the data + agents folders
 npm run doctor -- --data-dir /path/to/data
 npm run doctor -- --json                    # machine readable
 ```
 
 Read only, reports with a severity for each finding. The failures worth catching
-are not crashes but states that are still valid JSON and still wrong:
+are not crashes but states that are still valid files and still wrong:
 
 | Area | Checks |
 | --- | --- |
-| agents | file name matches the record's code, no duplicate or case-colliding codes, records parse and match the schema, set valued fields free of duplicates and sorted, no absolute or `..` paths, `parent` points at an agent that exists |
+| agents | the agents folder exists, every file parses, every frontmatter matches the bundled schema, no two codes collide ignoring case |
 | hashes | run files parse, no two runs claiming one id, every path relative and inside the root, no repeated or out-of-order hashes, every folder hash equal to the rollup of its children, the index lists every run |
-| executions | receipt files parse, no unknown agent code, every path relative and inside the git root, no output published twice under unchanged inputs, no receipt that no longer matches the committed files |
-| data | `agents.schema.json` present, no leftover legacy `hashes.json`, incomplete workspace settings |
+| data | no leftover legacy `hashes.json`, incomplete workspace settings |
 
 Exit code is `1` when anything is an error. A folder hash is recomputed with the
 very function the runner used, so the check cannot drift from the writer.
 
 ## Data layout
 
-`webapp/` holds only code; everything the app persists lives in `data/`:
+`webapp/` holds only code. What the app persists lives in `data/`; what the
+agents are lives in the agents folder:
 
 ```
+agents/                 the default agents folder (tracked, hand-written)
+  AG-001.md             one markdown file per agent - the name stem is the code
 data/
-  agents.schema.json    JSON Schema (draft 2020-12) every write is validated against
-  agents/
-    AG-001.json         one file per agent record - the file name is the agent code
   hashes/
     runs/*.json         one immutable file per hash run   [git ignored]
     index.json          derived cache (git ignored, rebuildable)
-  executions/
-    README.md           what a receipt is, and the commit discipline
-    <id>.json           one immutable receipt per published run (committed)
-  execution-plan.json   saved run-order snapshot for the Hashing tab; user-authored, not committed
   state.json            UI state, e.g. the last folder used in the hashing tab
-  settings.json         settings chosen in the Settings tab
+  settings.json         settings chosen in the Settings tab, incl. the agents folder
 ```
 
-Writes go through a temporary file plus `rename()`, so an interrupted write can
-never truncate a file.
+The agents folder is a setting; an empty setting means `agents/` next to
+`package.json`. Writes to `data/` go through a temporary file plus `rename()`,
+so an interrupted write can never truncate a file.
 
 **Hash run files are not tracked.** They record the absolute path of the folder
 that was hashed and the path of every file in it, which is local information by
@@ -183,57 +159,39 @@ nature - so this repository ships an empty store and your first run fills it. A
 team that wants one shared store in git can opt in; see
 [`data/hashes/README.md`](data/hashes/README.md).
 
-**Execution receipts are tracked.** Unlike a hash run, a receipt holds only
-git-relative paths and hashes - no absolute path, no machine name - so it is
-meant to be committed and pulled by the rest of the team. See
-[`data/executions/README.md`](data/executions/README.md).
-
 `state.json`, `settings.json` and the data-folder location are machine specific
 too, so they are git ignored, and a missing, empty or malformed one falls back to
 the defaults instead of breaking the app.
 
 ### The agent store
 
-- **The code is the file name.** Codes are checked against
-  `[A-Za-z0-9][A-Za-z0-9._-]*` before they become a path, so a code can never
-  escape the folder. Changing a code in the edit popup renames the file.
-- **A file whose code disagrees with its name is refused**, with an error naming
-  the file and both codes, instead of appearing as a row that would write to the
-  wrong file. Codes that differ only in case are reported too: two files on
-  Linux, one file on macOS or Windows.
+- **The code is the file name.** File-name stems are checked against
+  `[A-Za-z0-9][A-Za-z0-9._-]*` before they become paths, so a code can never
+  escape the folder. A stray `code` key in frontmatter is ignored - the stem
+  wins.
+- **The frontmatter is the contract.** Exactly four required fields, validated
+  on read against the bundled schema. The body is free-form markdown the app
+  displays but never interprets.
 - **Grid order is code order**, never the filesystem's.
-- **A broken file is reported, not hidden** - an error badge next to the grid
-  instead of a silent disappearance.
-- An existing code returns `409`; every write is validated twice, once for the
-  record and once for the collection it would belong to.
+- **A broken file is reported, not hidden** - it is left out of the list and
+  named by its file name next to the grid badge and in `npm run doctor`.
+  Codes that differ only in case are reported too: two files on Linux, one file
+  on macOS or Windows.
 
 ## HTTP API
 
 | Method + path | Purpose |
 | --- | --- |
-| `GET /api/agents` | every record from `data/agents/`, sorted by code, plus its validation result |
-| `GET /api/agents/:code` | one record |
-| `POST /api/agents` | create `data/agents/<code>.json` (`409` if the code exists) |
-| `PUT /api/agents/:code` | update that file; renames it when the code changed |
-| `DELETE /api/agents/:code` | remove the file |
-| `GET /api/schema` | the JSON Schema, used to build the edit form |
-| `GET /api/changes` | uncommitted git files inside the workspace folder, each with the `consumers` / `producers` agent codes |
-| `POST /api/agents/:code/link-files` | add paths to that agent's `result_generated_files` |
-| `POST /api/agents/:code/link-inputs` | add exact paths to that agent's `source_dependant_files` |
-| `GET /api/agent-dependencies` | agents plus the edges where one agent's output feeds another's input |
-| `GET /api/execution-plan` | the saved run order for the paths that changed, with per-step `done` flags |
-| `POST /api/execution-plan/generate` | rebuild that plan from the current hash view |
-| `PATCH /api/execution-plan` | toggle one or more step `done` flags |
+| `GET /api/agents` | every valid record from the agents folder, sorted by code, plus issues for the files that could not be used |
+| `GET /api/agents/:code` | one record, frontmatter and body |
 | `GET /api/hashes` | hash history assembled from the run files |
 | `POST /api/hashes/rebuild` | force a rebuild of the derived index |
-| `GET /api/executions` | execution receipts, each with its status against git |
-| `POST /api/executions` | record an execution from `{agent, paths}` (`409` if already published for the same inputs) |
 | `GET /api/state` | `state.json` (e.g. the last hashed folder) |
 | `PUT /api/state` | merge a patch into `state.json` |
-| `GET /api/settings` | `settings.json` (workspace folder and git root) |
+| `GET /api/settings` | `settings.json` (workspace folder, git root, agents folder) |
 | `PUT /api/settings` | validate, then merge a patch into `settings.json` |
 | `GET /api/data-folder` | the data folder setting and the folder in use |
-| `PUT /api/data-folder` | switch data folder, carrying the schema over if needed |
+| `PUT /api/data-folder` | switch data folder |
 | `GET /api/fs?path=…` | one directory listing for the folder browser |
 | `POST /api/hash` | `{path, includeHidden, followSymlinks}` → newline delimited JSON progress stream |
 
@@ -241,33 +199,24 @@ the defaults instead of breaking the app.
 
 ```
 package.json                  npm scripts and the runtime dependencies
+agents/                       the default agents folder (see above)
 data/                         everything the app persists (see above)
 webapp/server.js              express app: static files + API
 webapp/server/
-  config.js                   CLI/env configuration, data paths
-  store.js                    read/write JSON, atomic writes
-  validate.js                 Ajv 2020-12: record and collection validators
-  agentsStore.js              one JSON file per agent in data/agents/
-  agentsApi.js                CRUD for the agent files, GET /api/schema,
-                              POST /api/agents/:code/link-files, link-inputs
-  agentsValidation.js         one agent record + its collection, shared by both
-  agentDependencies.js        which agents' outputs feed other agents' inputs;
-                              consumersOf / producersOf: who touches one path
-  dependenciesApi.js          GET /api/agent-dependencies
-  gitChanges.js               git status of the workspace folder, relative to the git root
-  changesApi.js               GET /api/changes, rows stamped with consumers / producers
-  executionPlan.js            run order derived from the changed paths
-  executionPlanStore.js       data/execution-plan.json, tolerant of a broken file
-  executionPlanApi.js         GET/POST/PATCH /api/execution-plan
-  executionsStore.js          execution receipts: git blob + SHA-256 of inputs and outputs
-  executionsApi.js            GET/POST /api/executions
+  config.js                   CLI/env configuration, data + agents paths
+  store.js                    read/write JSON, atomic writes, creates parents
+  validate.js                 Ajv 2020-12: agent frontmatter validation
+  schemas/
+    agent.frontmatter.schema.json   bundled with the app
+  agentsStore.js              one markdown file per agent, read-only
+  agentsApi.js                GET /api/agents, GET /api/agents/:code
   stateFile.js                shared read/write/atomic-write helper for the two small files
   stateStore.js               data/state.json, tolerant of a broken file
   stateApi.js                 GET/PUT /api/state
   settingsStore.js            data/settings.json, tolerant of a broken file
   settingsValidation.js       workspace/git root rules enforced on save
   settingsApi.js              GET/PUT /api/settings
-  dataFolderApi.js            GET/PUT /api/data-folder, switch + schema carry-over
+  dataFolderApi.js            GET/PUT /api/data-folder
   fsApi.js                    GET /api/fs, path resolution and root jail
   hashRunner.js               walk, parallel SHA-256, folder rollups
   hashApi.js                  POST /api/hash progress stream, GET /api/hashes
@@ -276,9 +225,8 @@ webapp/index.html             import map: "vue" -> /vendor/vue.esm-browser.prod.
 webapp/styles.css
 webapp/src/                   browser app (no build step)
   main.js  api.js  store.js  format.js
-  components/  App  AgentsTab  AgentModal  AgentDependenciesTab
-                HashingTab  HashDetail  ExecutionPlanPanel  LinkChangesTab
-                ExecutionsTab  FolderPicker  SettingsTab  DataTable
+  components/  App  AgentsTab  HashingTab  HashDetail
+                FolderPicker  SettingsTab  DataTable
 webapp/tools/
   doctor.js                   npm run doctor: read only integrity checks
 test/                         npm test: node:test suite, temp data folders only
@@ -288,9 +236,10 @@ test/                         npm test: node:test suite, temp data folders only
 
 All MIT and actively maintained: [express](https://expressjs.com) 5.x (HTTP
 server), [vue](https://vuejs.org) 3.5 (UI, served from `node_modules`, no
-bundler), [ajv](https://ajv.js.org) 8.x + ajv-formats (schema validation).
-Hashing uses `node:crypto`, so there is no hashing dependency. Tests use
-`node:test`, so there is no test dependency either.
+bundler), [ajv](https://ajv.js.org) 8.x + ajv-formats (schema validation),
+[gray-matter](https://github.com/jonschlinkert/gray-matter) 4.x (YAML
+frontmatter). Hashing uses `node:crypto`, so there is no hashing dependency.
+Tests use `node:test`, so there is no test dependency either.
 
 ## Documentation
 
@@ -298,7 +247,6 @@ Hashing uses `node:crypto`, so there is no hashing dependency. Tests use
 | --- | --- |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | how it is built and why - the file to read first |
 | [`data/hashes/README.md`](data/hashes/README.md) | what a hash run file is, and how to share a store through git |
-| [`data/executions/README.md`](data/executions/README.md) | what an execution receipt is, and the commit discipline around it |
 
 ## License
 

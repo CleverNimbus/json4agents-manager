@@ -78,6 +78,13 @@ describe('writeJsonFile', () => {
     assert.deepEqual(await listNames(dir), ['a.json', 'b.json']);
   });
 
+  it('creates parent folders that do not exist yet', async () => {
+    const dir = await tempDir('store-mkdir');
+    const file = path.join(dir, 'nested', 'deep', 'a.json');
+    await writeJsonFile(file, { a: 1 });
+    assert.deepEqual(await readJsonFile(file, null), { a: 1 }, 'the first save creates the folder it needs');
+  });
+
   it('round trips non-ASCII content without mangling it', async () => {
     const dir = await tempDir('store');
     const file = path.join(dir, 'a.json');

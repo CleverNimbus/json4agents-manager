@@ -4,7 +4,6 @@
  */
 import { computed, reactive, ref, watch } from 'vue';
 import DataTable from './DataTable.js';
-import ExecutionPlanPanel from './ExecutionPlanPanel.js';
 import HashDetail from './HashDetail.js';
 import { formatBytes, formatDuration, formatTime, latestHash, shortHash } from '../format.js';
 import {
@@ -86,7 +85,7 @@ const runColumns = [
 
 export default {
   name: 'HashingTab',
-  components: { DataTable, ExecutionPlanPanel, HashDetail },
+  components: { DataTable, HashDetail },
   setup() {
     /** Folder picked from the dropdown. Always one of `store.settings.hashFolders`. */
     const selectedFolder = ref('');
@@ -315,9 +314,6 @@ export default {
       <p class="progress" :class="store.hashJob.phase">{{ store.hashJob.progressText }}</p>
 
       <div class="hashing-split">
-        <aside class="hashing-left">
-          <ExecutionPlanPanel />
-        </aside>
         <div class="hashing-right">
           <div class="toolbar">
             <div class="segmented">

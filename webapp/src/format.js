@@ -43,8 +43,6 @@ export const shortHash = (hash) => (typeof hash === 'string' && hash !== '' ? ha
 
 export const lastOf = (list) => (Array.isArray(list) && list.length > 0 ? list[list.length - 1] : '');
 
-export const countOf = (list) => (Array.isArray(list) ? list.length : 0);
-
 /**
  * Current SHA-256 of a hash store entry.
  *

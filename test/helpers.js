@@ -22,9 +22,9 @@ import path from 'node:path';
 import { after } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import matter from 'gray-matter';
 
 import { setDataDir } from '../webapp/server/config.js';
-import { resetSchemaCache } from '../webapp/server/validate.js';
 
 const run = promisify(execFile);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -45,33 +45,44 @@ after(async () => {
 });
 
 /**
- * Give the test an isolated data folder: schema copied from the real one,
- * agents/ created, and `config.dataDir` pointed at it.
+ * Give the test an isolated data folder whose settings point at a fresh agents
+ * folder inside it, optionally seeded with markdown agent files.
  *
- * @param {{label?: string, agents?: object[]}} [options]
+ * @param {{label?: string, agents?: object[]}} [options] each agent needs a
+ *   `code` (the file name stem); the rest of the record is frontmatter, `body`
+ *   is the markdown below it.
  */
 export async function useDataFolder({ label = 'data', agents = [] } = {}) {
   const dir = await tempDir(label);
-  await fs.mkdir(path.join(dir, 'agents'), { recursive: true });
-  await fs.copyFile(path.join(repoDir, 'data', 'agents.schema.json'), path.join(dir, 'agents.schema.json'));
-  for (const agent of agents) {
-    await fs.writeFile(path.join(dir, 'agents', `${agent.code}.json`), `${JSON.stringify(agent, null, 2)}\n`);
+  const agentsDir = path.join(dir, 'agents');
+  await fs.mkdir(agentsDir, { recursive: true });
+  await write(path.join(dir, 'settings.json'), { agentsFolder: agentsDir });
+  for (const record of agents) {
+    const { code, body = '', ...frontmatter } = record;
+    await write(path.join(agentsDir, `${code}.md`), matter.stringify(`# ${body}`, frontmatter));
   }
   return pointAt(dir);
 }
 
-/**
- * Point the app at an existing data folder. The schema cache has to be dropped
- * too, otherwise validation would keep using the previous folder's schema.
- */
+/** Point the app at an existing data folder. */
 export function pointAt(dir) {
   setDataDir(dir);
-  resetSchemaCache();
   return dir;
 }
 
-/** A minimal record that satisfies $defs/agent. */
-export const agent = (code, overrides = {}) => ({ code, name: `Agent ${code}`, phase: 1, ...overrides });
+/** A minimal record whose frontmatter satisfies the bundled agent schema. */
+export const agent = (code, overrides = {}) => ({
+  code,
+  execution_mode: 'full_input_processing',
+  information_sources: ['src/'],
+  information_outputs: ['Architecture'],
+  generated_document_types: ['architecture.md'],
+  ...overrides,
+});
+
+/** Render an agent record (from `agent()`) as a markdown file's text. */
+export const agentMd = ({ code, body, ...frontmatter }, overrideBody) =>
+  matter.stringify(`${overrideBody ?? body ?? 'the document'}\n`, frontmatter);
 
 /** Write a file, creating parent folders. */
 export async function write(file, content) {

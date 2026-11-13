@@ -6,7 +6,9 @@
  * Reading and writing the JSON data files.
  *
  * Writes go to a temporary file next to the target and are then renamed, so a
- * crash mid-write can never leave a half written agents.json behind.
+ * crash mid-write can never leave a half written data file behind. The parent
+ * folder is created on demand, so pointing the app at a fresh folder works
+ * before any file exists there.
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -29,6 +31,7 @@ export async function readJsonFile(file, fallback) {
 }
 
 export async function writeJsonFile(file, value) {
+  await fs.mkdir(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   const text = `${JSON.stringify(value, null, 2)}\n`;
   await fs.writeFile(tmp, text, 'utf8');

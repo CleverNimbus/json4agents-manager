@@ -29,6 +29,11 @@ const DEFAULTS = {
    * hashing tab does not consume this list yet.
    */
   hashFolders: [],
+  /**
+   * Folder holding the markdown agent files (the agents tab reads it).
+   * Empty means <repo>/agents.
+   */
+  agentsFolder: '',
   /** ISO timestamp of the last change, filled in on write. */
   updatedAt: '',
 };
@@ -49,7 +54,7 @@ function normaliseFolders(value) {
 
 function sanitise(raw) {
   const state = structuredClone(DEFAULTS);
-  for (const key of ['workspaceFolder', 'gitRoot', 'updatedAt']) {
+  for (const key of ['workspaceFolder', 'gitRoot', 'agentsFolder', 'updatedAt']) {
     if (typeof raw?.[key] === 'string') state[key] = raw[key].trim();
   }
   state.hashFolders = normaliseFolders(raw?.hashFolders);
@@ -63,7 +68,7 @@ export const readSettings = () => file.read();
 /** Merge a patch into the stored settings and write it back. */
 export async function updateSettings(patch) {
   const next = await readSettings();
-  for (const key of ['workspaceFolder', 'gitRoot']) {
+  for (const key of ['workspaceFolder', 'gitRoot', 'agentsFolder']) {
     if (typeof patch?.[key] === 'string') next[key] = patch[key].trim();
   }
   if (patch?.hashFolders !== undefined) next.hashFolders = normaliseFolders(patch.hashFolders);

@@ -8,6 +8,7 @@ import FolderPicker from './FolderPicker.js';
 import { formatTime } from '../format.js';
 import {
   clearBanner,
+  loadAgents,
   loadDataFolder,
   loadSettings,
   saveDataFolder,
@@ -49,6 +50,13 @@ export default {
     const dataFolderSaving = ref(false);
     const dataFolderPicker = reactive({ open: false });
 
+    // Agents folder block: one more string setting, saved with the workspace
+    // pair in settings.json. The app only reads it, never creates it.
+    const agentsFolder = ref('');
+    const agentsFolderError = ref('');
+    const agentsFolderSaving = ref(false);
+    const agentsFolderPicker = reactive({ open: false });
+
     // Hash folder collection: a list of paths the user wants to hash often. The
     // grid mirrors the store; every add/remove persists via saveSettings.
     const hashFolderDraft = ref('');
@@ -66,6 +74,7 @@ export default {
         for (const field of FIELDS) {
           if (values[field.key] === '') values[field.key] = settings[field.key] ?? '';
         }
+        if (agentsFolder.value === '') agentsFolder.value = settings.agentsFolder ?? '';
       })
       .catch((err) => setBanner('error', err.message));
 
@@ -76,6 +85,7 @@ export default {
     const savedAt = computed(() => (store.settings.updatedAt ? formatTime(store.settings.updatedAt) : ''));
     const isDirty = computed(() => FIELDS.some((field) => values[field.key].trim() !== (store.settings[field.key] ?? '')));
     const dataFolderDirty = computed(() => dataFolder.value.trim() !== (store.dataFolder.value ?? ''));
+    const agentsFolderDirty = computed(() => agentsFolder.value.trim() !== (store.settings.agentsFolder ?? ''));
 
     /** @param {string} message */
     function fail(message) {
@@ -165,6 +175,50 @@ export default {
       await persistDataFolder('');
     };
 
+    /**
+     * Point the Agents tab at another folder. Saving re-reads the list so the
+     * table and the "in use" hint show the new folder right away; issues in
+     * its files are reported instead of silently hiding rows.
+     */
+    async function persistAgentsFolder(value = agentsFolder.value) {
+      const next = String(value).trim();
+      agentsFolderError.value = '';
+      if (next === store.settings.agentsFolder) {
+        agentsFolder.value = next;
+        return;
+      }
+      agentsFolderSaving.value = true;
+      try {
+        await saveSettings({ agentsFolder: next });
+        await loadAgents();
+        agentsFolder.value = store.settings.agentsFolder;
+        clearBanner();
+        setBanner(
+          store.agents.valid ? 'info' : 'error',
+          store.agents.valid
+            ? `Agents folder is now ${store.agents.dir}.`
+            : `Agents folder is now ${store.agents.dir}, but ${store.agents.errors.length} file(s) have issues.`,
+        );
+      } catch (err) {
+        agentsFolderError.value = err.message;
+        setBanner('error', `Agents folder unchanged: ${err.message}`);
+      } finally {
+        agentsFolderSaving.value = false;
+      }
+    }
+
+    const chooseAgentsFolder = async (chosen) => {
+      agentsFolderPicker.open = false;
+      agentsFolder.value = chosen;
+      await persistAgentsFolder(chosen);
+    };
+
+    /** An empty value means "use the default <repo>/agents". */
+    const resetAgentsFolder = async () => {
+      agentsFolder.value = '';
+      await persistAgentsFolder('');
+    };
+
     const hashFolderRows = computed(() => {
       const list = Array.isArray(store.settings.hashFolders) ? store.settings.hashFolders : [];
       return list.map((path, position) => ({ position: position + 1, storeIndex: position, path }));
@@ -226,6 +280,12 @@ export default {
 
     return {
       addHashFolder,
+      agentsFolder,
+      agentsFolderDirty,
+      agentsFolderError,
+      agentsFolderPicker,
+      agentsFolderSaving,
+      chooseAgentsFolder,
       chooseDataFolder,
       chooseFolder,
       chooseHashFolder,
@@ -248,9 +308,11 @@ export default {
       openHashFolderPicker,
       openPicker,
       persist,
+      persistAgentsFolder,
       persistDataFolder,
       picker,
       removeHashFolder,
+      resetAgentsFolder,
       resetDataFolder,
       savedAt,
       saving,
@@ -269,8 +331,9 @@ export default {
 
         <p class="setting-note">
           Both fields are stored in <span class="mono">{{ store.settings.file }}</span>.
-          The <em>Link Changes to Agent</em> tab reads them to list the uncommitted git
-          files of the workspace folder; nothing else uses them yet.
+          They describe the git workspace; the server keeps the pair consistent -
+          the root must contain a <span class="mono">.git</span> folder and the
+          workspace folder must live inside it.
         </p>
 
         <div class="setting-field" v-for="field in FIELDS" :key="field.key" :class="{ invalid: errors[field.key] }">
@@ -305,6 +368,53 @@ export default {
 
       <div class="setting-block">
         <header class="setting-head">
+          <h2>Agents folder</h2>
+          <span class="badge" v-if="agentsFolderDirty">unsaved</span>
+        </header>
+
+        <p class="setting-note">
+          The markdown files behind the Agents tab live here. Stored in
+          <span class="mono">{{ store.settings.file }}</span> as
+          <span class="mono">agentsFolder</span>. The app only reads this folder -
+          agent files are edited by hand.
+        </p>
+
+        <div class="setting-field">
+          <p class="hint">
+            Leave the box empty to use the default <span class="mono">&lt;repo&gt;/agents</span>.
+          </p>
+          <div class="toolbar">
+            <input
+              id="set-agents-folder"
+              v-model="agentsFolder"
+              class="path-input mono"
+              type="text"
+              placeholder="leave empty for the default"
+              :disabled="agentsFolderSaving"
+              @keyup.enter="persistAgentsFolder()"
+              @blur="persistAgentsFolder()"
+            />
+            <button type="button" @click="agentsFolderPicker.open = true" :disabled="agentsFolderSaving">Browse…</button>
+            <button type="button" @click="resetAgentsFolder" :disabled="agentsFolderSaving || !agentsFolderDirty">
+              Use default
+            </button>
+            <span class="spacer"></span>
+            <button
+              type="button"
+              class="primary"
+              @click="persistAgentsFolder()"
+              :disabled="agentsFolderSaving || !agentsFolderDirty"
+            >Save</button>
+          </div>
+          <p v-if="agentsFolderError" class="setting-error">{{ agentsFolderError }}</p>
+          <p class="hint setting-resolved">
+            In use: <span class="mono">{{ store.agents.dir }}</span>
+          </p>
+        </div>
+      </div>
+
+      <div class="setting-block">
+        <header class="setting-head">
           <h2>Data folder</h2>
           <span class="badge" v-if="store.dataFolder.isDefault">default</span>
           <span class="badge" v-else>custom</span>
@@ -312,16 +422,14 @@ export default {
         </header>
 
         <p class="setting-note">
-          Where the app keeps its JSON files: <span class="mono">agents/</span>,
-          <span class="mono">agents.schema.json</span>, <span class="mono">hashes.json</span>,
+          Where the app keeps its JSON files: <span class="mono">hashes/</span>,
           <span class="mono">state.json</span> and <span class="mono">settings.json</span>.
           Changing it makes the app read and write somewhere else and reloads every tab.
         </p>
 
         <div class="setting-field">
           <p class="hint">
-            A folder that does not exist yet is created, and a missing
-            <span class="mono">agents.schema.json</span> is copied along from the current one.
+            A folder that does not exist yet is created on the first save.
             Leave the box empty to use <span class="mono">{{ store.dataFolder.defaultDir }}</span>.
           </p>
           <div class="toolbar">
@@ -416,6 +524,13 @@ export default {
         :start-path="values[picker.field]"
         @close="picker.open = false"
         @select="chooseFolder"
+      />
+
+      <FolderPicker
+        v-if="agentsFolderPicker.open"
+        :start-path="agentsFolder || store.agents.dir"
+        @close="agentsFolderPicker.open = false"
+        @select="chooseAgentsFolder"
       />
 
       <FolderPicker

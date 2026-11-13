@@ -10,25 +10,16 @@
  *   npm run doctor -- --json    machine readable output
  *
  * The store is plain files in git, so the interesting failures are not crashes
- * but states that are valid JSON and still wrong: an agent whose code disagrees
- * with its file name, a hash history that repeats itself, a folder hash that no
- * longer matches its children. Everything here is read only.
+ * but states that are valid text and still wrong: an agent file whose
+ * frontmatter does not match the schema, a hash history that repeats itself, a
+ * folder hash that no longer matches its children. Everything here is read only.
  *
  * Exit code is 1 when anything is an error, so it can gate a commit or a build.
  */
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config, files } from '../server/config.js';
-import { scanAgents } from '../server/agentsStore.js';
-import { validateAgentRecord } from '../server/validate.js';
+import { agentsDir, scanAgents } from '../server/agentsStore.js';
 import { getIndex, listRunFiles, readAllRuns, readBrokenRunFiles } from '../server/hashesStore.js';
-import {
-  listReceiptFiles,
-  readAllReceipts,
-  readBrokenReceiptFiles,
-  receiptsView,
-  sameEntrySet,
-} from '../server/executionsStore.js';
 import { rollupHash } from '../server/hashRunner.js';
 import { readState } from '../server/stateStore.js';
 import { readSettings as readSettingsFile } from '../server/settingsStore.js';
@@ -44,52 +35,10 @@ const add = (level, area, message, detail) => findings.push({ level, area, messa
 
 async function checkAgents() {
   const { records, issues } = await scanAgents();
-
+  // scanAgents already rejects files whose frontmatter does not match the
+  // bundled schema; everything it could not use arrives as an issue.
   for (const issue of issues) add('error', 'agents', issue.message, issue.file);
-
-  const codes = new Map();
-  for (const { code, agent } of records) {
-    codes.set(code, (codes.get(code) ?? 0) + 1);
-
-    const { valid, errors } = await validateAgentRecord(agent);
-    if (!valid) {
-      add('error', 'agents', `${code} does not match the schema`, errors.map((e) => `${e.path} ${e.message}`).join('; '));
-    }
-
-    for (const field of ['result_generated_files', 'source_dependant_files']) {
-      const value = agent[field];
-      if (!Array.isArray(value)) continue;
-      if (new Set(value).size !== value.length) {
-        add('warning', 'agents', `${code}.${field} contains duplicate entries`, value.filter((v, i) => value.indexOf(v) !== i));
-      }
-      // These are sets; sorting keeps diffs between machines small.
-      if ([...value].sort().join('\u0000') !== value.join('\u0000')) {
-        add('warning', 'agents', `${code}.${field} is not sorted`, 'sorting it keeps diffs between machines small');
-      }
-    }
-
-    for (const field of ['result_generated_files', 'source_dependant_files']) {
-      const value = Array.isArray(agent[field]) ? agent[field] : [];
-      if (agent[field] !== undefined && !Array.isArray(agent[field])) continue;
-      for (const entry of value) {
-        if (typeof entry !== 'string') continue;
-        if (path.isAbsolute(entry)) add('error', 'agents', `${code}.${field} holds an absolute path`, entry);
-        else if (entry.split(/[\\/]/).includes('..')) add('error', 'agents', `${code}.${field} escapes the git root`, entry);
-      }
-    }
-  }
-
-  for (const [code, count] of codes) {
-    if (count > 1) add('error', 'agents', `Code ${code} is used by ${count} files`);
-  }
-
-  for (const { code, agent } of records) {
-    if (typeof agent.parent === 'string' && agent.parent !== '' && !codes.has(agent.parent)) {
-      add('warning', 'agents', `${code} points at parent "${agent.parent}", which does not exist`);
-    }
-  }
-
-  return { count: records.length, codes: new Set(codes.keys()) };
+  return { count: records.length };
 }
 
 // -------------------------------------------------------------------- hashes
@@ -205,103 +154,9 @@ const push = (list, entry, run) => {
   list.set(entry.path, history);
 };
 
-// -------------------------------------------------------------- executions
-
-async function checkExecutions(agentCodes) {
-  if (!(await fileExists(files.executionsDir))) {
-    add('info', 'executions', 'No execution receipts recorded yet');
-    return 0;
-  }
-
-  const receiptFiles = await listReceiptFiles();
-  const receipts = await readAllReceipts();
-
-  for (const broken of await readBrokenReceiptFiles()) {
-    add('error', 'executions', `Receipt ${broken.file} cannot be read`, broken.message);
-  }
-
-  const seenIds = new Map();
-
-  for (const receipt of receipts) {
-    const previous = seenIds.get(receipt.id);
-    if (previous) add('error', 'executions', `Two receipt files claim the id ${receipt.id}`, path.basename(previous));
-    else seenIds.set(receipt.id, receipt.file ?? receipt.id);
-
-    if (!receipt.agent) add('error', 'executions', `Receipt ${receipt.id} has no agent code`);
-    else if (!agentCodes.has(receipt.agent)) {
-      add('warning', 'executions', `Receipt ${receipt.id} names agent ${receipt.agent}, which does not exist`);
-    }
-    if (!receipt.recordedAt) add('error', 'executions', `Receipt ${receipt.id} has no timestamp`);
-    if (receipt.outputs.length === 0) add('warning', 'executions', `Receipt ${receipt.id} records no generated files`);
-
-    for (const entry of [...receipt.inputs, ...receipt.outputs]) {
-      if (entry.blob === '' || entry.sha256 === '') {
-        add('error', 'executions', `Receipt ${receipt.id} holds an entry without a blob or hash`, entry.path);
-        continue;
-      }
-      if (path.isAbsolute(entry.path)) add('error', 'executions', `Receipt ${receipt.id} holds an absolute path`, entry.path);
-      else if (entry.path.split('/').includes('..')) add('error', 'executions', `Receipt ${receipt.id} escapes the git root`, entry.path);
-    }
-  }
-
-  // The same output path must not be published twice for the same inputs.
-  // Identical content is only noise; different content under unchanged inputs
-  // is the hand-edit this store refuses to bless.
-  const published = [];
-  let conflicts = 0;
-  for (const receipt of receipts) {
-    for (const output of receipt.outputs) {
-      const twin = published.find(
-        (p) => p.agent === receipt.agent && p.path === output.path && sameEntrySet(p.inputs, receipt.inputs),
-      );
-      if (!twin) {
-        published.push({ agent: receipt.agent, path: output.path, sha256: output.sha256, inputs: receipt.inputs, id: receipt.id });
-        continue;
-      }
-      conflicts += 1;
-      if (conflicts <= MAX_LISTED) {
-        const identical = twin.sha256 === output.sha256;
-        add(
-          identical ? 'warning' : 'error',
-          'executions',
-          identical
-            ? `${output.path} is recorded twice for the same inputs (${twin.id}, ${receipt.id})`
-            : `${output.path} changed under unchanged inputs (${twin.id}, ${receipt.id})`,
-          identical ? 'the later receipt adds nothing' : 'a hand-edited output must not be published as a new run',
-        );
-      }
-    }
-  }
-  if (conflicts > MAX_LISTED) add('error', 'executions', `… and ${conflicts - MAX_LISTED} more repeated outputs`);
-
-  // Statuses need git; a data folder without a configured workspace is fine.
-  try {
-    const view = await receiptsView();
-    if (!view.configured) {
-      add('info', 'executions', 'Receipt statuses were not checked against git', 'no workspace folder and git root configured');
-    } else {
-      let diverged = 0;
-      for (const receipt of view.receipts) {
-        if (receipt.status !== 'diverged') continue;
-        diverged += 1;
-        if (diverged <= MAX_LISTED) {
-          add('warning', 'executions', `Receipt ${receipt.id} no longer matches the committed files`, 'an output changed without the inputs changing');
-        }
-      }
-      if (diverged > MAX_LISTED) add('warning', 'executions', `… and ${diverged - MAX_LISTED} more diverged receipts`);
-    }
-  } catch (err) {
-    add('info', 'executions', 'Receipt statuses were not checked against git', err.message);
-  }
-
-  return receiptFiles.length;
-}
-
 // -------------------------------------------------------------- data folder
 
 async function checkDataFolder() {
-  if (!(await fileExists(files.schema))) add('error', 'data', 'agents.schema.json is missing', files.schema);
-
   const legacy = await fileExists(files.hashes);
   if (legacy) {
     add('warning', 'data', 'A legacy hashes.json is still present and is no longer read', 'remove it once you are happy with the run files');
@@ -324,7 +179,6 @@ async function main() {
   const asJson = process.argv.includes('--json');
   const agents = await checkAgents();
   const runs = await checkHashes();
-  const receipts = await checkExecutions(agents.codes);
   const meta = await checkDataFolder();
 
   const errors = findings.filter((f) => f.level === 'error');
@@ -332,13 +186,12 @@ async function main() {
   const infos = findings.filter((f) => f.level === 'info');
 
   if (asJson) {
-    console.log(JSON.stringify({ dataDir: config.dataDir, agents: agents.count, receipts, runs, findings }, null, 2));
+    console.log(JSON.stringify({ dataDir: config.dataDir, agents: agents.count, runs, findings }, null, 2));
     return errors.length === 0 ? 0 : 1;
   }
 
   console.log(`data folder : ${config.dataDir}`);
   console.log(`agents      : ${agents.count}`);
-  console.log(`receipts    : ${receipts}`);
   console.log(`hash runs   : ${runs}`);
   console.log(`last hashed : ${meta.lastFolder || '(none)'}`);
   console.log('');

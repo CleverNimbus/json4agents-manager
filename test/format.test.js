@@ -14,7 +14,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { countOf, formatBytes, formatDuration, formatTime, lastOf, latestHash, shortHash, summariseList } from '../webapp/src/format.js';
+import { formatBytes, formatDuration, formatTime, lastOf, latestHash, shortHash, summariseList } from '../webapp/src/format.js';
 
 describe('formatBytes', () => {
   it('uses bytes below 1 KB', () => {
@@ -105,12 +105,6 @@ describe('latestHash', () => {
 });
 
 describe('list helpers', () => {
-  it('counts arrays and is empty otherwise', () => {
-    assert.equal(countOf([1, 2, 3]), 3);
-    assert.equal(countOf([]), 0);
-    assert.equal(countOf(undefined), 0);
-  });
-
   it('summarises a list and marks the overflow', () => {
     assert.equal(summariseList([]), '');
     assert.equal(summariseList(['a']), '1 · a');

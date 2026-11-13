@@ -17,7 +17,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 
-import { config, defaultDataDir, files, resolveDataFolder } from '../webapp/server/config.js';
+import {
+  config,
+  defaultAgentsDir,
+  defaultDataDir,
+  files,
+  resolveAgentsFolder,
+  resolveDataFolder,
+} from '../webapp/server/config.js';
 import { expandPath, parentOf, resolveBrowsable } from '../webapp/server/fsApi.js';
 import {
   dataFolderPointerFile,
@@ -129,14 +136,24 @@ describe('resolveDataFolder', () => {
 describe('the files map follows the data folder', () => {
   it('is computed on access, so switching folders switches every path', async () => {
     const first = await useDataFolder({ label: 'first' });
-    assert.equal(files.agentsDir, path.join(first, 'agents'));
-    assert.equal(files.schema, path.join(first, 'agents.schema.json'));
     assert.equal(files.hashesRunsDir, path.join(first, 'hashes', 'runs'));
     assert.equal(files.hashesIndex, path.join(first, 'hashes', 'index.json'));
 
     const second = await useDataFolder({ label: 'second' });
-    assert.equal(files.agentsDir, path.join(second, 'agents'), 'no stale value is held anywhere');
+    assert.equal(files.hashesRunsDir, path.join(second, 'hashes', 'runs'), 'no stale value is held anywhere');
     assert.equal(config.dataDir, second);
+  });
+});
+
+describe('resolveAgentsFolder', () => {
+  it('falls back to the repo agents folder when the setting is empty', () => {
+    assert.equal(resolveAgentsFolder(''), defaultAgentsDir);
+    assert.equal(resolveAgentsFolder(undefined), defaultAgentsDir);
+  });
+
+  it('expands the setting like a data folder', () => {
+    assert.equal(resolveAgentsFolder('somewhere'), path.join(repoDir, 'somewhere'));
+    assert.equal(resolveAgentsFolder('~/agents'), path.join(os.homedir(), 'agents'));
   });
 });
 

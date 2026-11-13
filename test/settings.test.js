@@ -162,12 +162,12 @@ describe('settings.json', () => {
 
   it('falls back to the defaults when the file is broken, instead of failing', async () => {
     await write(path.join(dir, 'settings.json'), '{ not json');
-    assert.deepEqual(await readSettings(), { workspaceFolder: '', gitRoot: '', hashFolders: [], updatedAt: '' });
+    assert.deepEqual(await readSettings(), { workspaceFolder: '', gitRoot: '', agentsFolder: '', hashFolders: [], updatedAt: '' });
   });
 
   it('falls back to the defaults when the file holds the wrong shape', async () => {
     await write(path.join(dir, 'settings.json'), { workspaceFolder: { nope: true }, gitRoot: 42 });
-    assert.deepEqual(await readSettings(), { workspaceFolder: '', gitRoot: '', hashFolders: [], updatedAt: '' });
+    assert.deepEqual(await readSettings(), { workspaceFolder: '', gitRoot: '', agentsFolder: '', hashFolders: [], updatedAt: '' });
   });
 
   it('keeps the fields it knows and drops the ones it does not', async () => {
@@ -183,6 +183,7 @@ describe('settings.json', () => {
     assert.ok(raw.endsWith('}\n'));
     assert.deepEqual(JSON.parse(raw).workspaceFolder, '/tmp/x');
     assert.deepEqual(await readJson(path.join(dir, 'settings.json')).then((v) => Object.keys(v).sort()), [
+      'agentsFolder',
       'gitRoot',
       'hashFolders',
       'updatedAt',

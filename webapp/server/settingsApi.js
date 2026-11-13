@@ -29,7 +29,7 @@ settingsRouter.put('/api/settings', async (req, res) => {
     return res.status(400).json({ error: 'Expected an object like { "workspaceFolder": "/path", "gitRoot": "/path", "hashFolders": ["/path"] }' });
   }
 
-  const fields = ['workspaceFolder', 'gitRoot'];
+  const fields = ['workspaceFolder', 'gitRoot', 'agentsFolder'];
   for (const key of fields) {
     if (patch[key] !== undefined && typeof patch[key] !== 'string') {
       return res.status(400).json({ error: `${key} must be a string` });

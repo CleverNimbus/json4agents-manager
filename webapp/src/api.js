@@ -33,30 +33,7 @@ async function request(url, options) {
 
 export const getAgents = () => request('/api/agents');
 
-export const getSchema = () => request('/api/schema');
-
 export const getHashes = () => request('/api/hashes');
-
-/** Computed producer -> consumer graph for the Agent Dependencies tab. */
-export const getDependencies = () => request('/api/agent-dependencies');
-
-/** Saved execution plan for the Hashing tab; empty shape when none exists. */
-export const getExecutionPlan = () => request('/api/execution-plan');
-
-/** Recompute the plan from the current hashes + agents and persist it. */
-export const generateExecutionPlan = () =>
-  request('/api/execution-plan/generate', { method: 'POST' });
-
-/**
- * Toggle the `done` flag on one or more steps. Body:
- *   { steps: [{ code: 'AG-001', done: true }, …] }
- */
-export const patchExecutionPlan = (patch) =>
-  request('/api/execution-plan', {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(patch),
-  });
 
 /** Discard the derived index and rebuild it from the run files. */
 export const rebuildHashIndex = () => request('/api/hashes/rebuild', { method: 'POST' });
@@ -89,55 +66,6 @@ export const saveSettings = (patch) =>
   });
 
 export const listFolder = (path) => request(`/api/fs?path=${encodeURIComponent(path ?? '')}`);
-
-/** Create data/agents/<code>.json. */
-export const createAgent = (agent) =>
-  request('/api/agents', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ agent }),
-  });
-
-/** Update the file of `previousCode`; a changed code renames the file. */
-export const updateAgent = (previousCode, agent) =>
-  request(`/api/agents/${encodeURIComponent(previousCode)}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ agent }),
-  });
-
-export const deleteAgent = (code) =>
-  request(`/api/agents/${encodeURIComponent(code)}`, { method: 'DELETE' });
-
-/** Uncommitted git changes inside the workspace folder. */
-export const getChanges = () => request('/api/changes');
-
-/** Add files to an agent's result_generated_files. */
-export const linkFiles = (code, paths) =>
-  request(`/api/agents/${encodeURIComponent(code)}/link-files`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ paths }),
-  });
-
-/** Add files as exact paths to an agent's source_dependant_files. */
-export const linkInputs = (code, paths) =>
-  request(`/api/agents/${encodeURIComponent(code)}/link-inputs`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ paths }),
-  });
-
-/** Execution receipts with their status against the current git state. */
-export const getExecutions = () => request('/api/executions');
-
-/** Publish one agent run as an immutable receipt file. */
-export const recordExecution = (agent, paths) =>
-  request('/api/executions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ agent, paths }),
-  });
 
 /**
  * Start a hash run and consume its progress stream.
